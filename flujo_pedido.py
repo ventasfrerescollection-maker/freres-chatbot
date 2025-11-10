@@ -28,7 +28,8 @@ def crear_pedido(telefono_usuario, productos_solicitados, metodo_entrega="envio_
             "producto_id": pid,
             "nombre": producto.get("nombre"),
             "precio": producto.get("precio"),
-            "imagen": producto.get("imagen_url")
+            "imagen": producto.get("imagen_url"),
+            "cantidad": stock_disponible
         })
         monto_total += producto.get("precio", 0)
 
@@ -65,5 +66,7 @@ def formatear_productos_para_usuario():
         nombre = p.get("nombre")
         precio = p.get("precio")
         stock = p.get("stock", {}).get("Piezas", "0")
-        mensaje += f"\n🔹 ID: {pid}\n🧸 {nombre}\n💵 ${precio} MXN\n📦 Stock: {stock}\n"
+        imagen = p.get("imagen_url", "")
+
+        mensaje += f"\n🧸 {nombre}\n💵 ${precio} MXN\n📦 Stock: {stock} unidades\n🖼 Imagen: {imagen}\n"
     return mensaje.strip()
