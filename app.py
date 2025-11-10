@@ -1,28 +1,22 @@
 from flask import Flask, request, jsonify
 import os
 from registro_usuario import registrar_usuario
-from conexion_firebase import db  # Útil si deseas hacer consultas directas
+from conexion_firebase import db
 from flujo_pedido import formatear_productos_para_usuario
 
 app = Flask(__name__)
 
-# ----------------------------
-# RUTA DEL WEBHOOK PARA DIALOGFLOW
-# ----------------------------
 @app.route('/webhook', methods=['POST'])
 def webhook_dialogflow():
     data = request.get_json()
 
-    # Extraer mensaje, intención y sesión
     mensaje_usuario = data["queryResult"]["queryText"]
     intent_nombre = data["queryResult"]["intent"]["displayName"]
-    session_id = data["session"].split("/")[-1]  # Este será el ID del usuario (puedes usarlo como teléfono)
-
-    # Parámetros que llegan desde Dialogflow (como nombre, dirección)
+    session_id = data["session"].split("/")[-1]
     parametros = data["queryResult"].get("parameters", {})
 
-    # ---- FLUJO DE REGISTRO DE USUARIO ----
-    if intent_nombre == "RegistrarUsuario":
+    # --- INTENTS PERSONALIZADOS SEGÚN TU DIALOGFLOW ---
+    if intent_nombre == "Registro":
         nombre = parametros.get("nombre", "").strip()
         direccion = parametros.get("direccion", "").strip()
 
@@ -32,21 +26,31 @@ def webhook_dialogflow():
         respuesta = registrar_usuario(telefono=session_id, nombre=nombre, direccion=direccion)
         return jsonify({"fulfillmentText": respuesta})
 
-    # ---- SALUDO SIMPLE ----
     elif intent_nombre == "Saludo":
         return jsonify({"fulfillmentText": "¡Hola! Bienvenido a Frere's Collection 👛👜 ¿En qué puedo ayudarte hoy?"})
 
-    # ---- MOSTRAR CATÁLOGO DE PRODUCTOS ----
-    elif intent_nombre.lower() == "catalogo":
+    elif intent_nombre == "catalogo":
         respuesta = formatear_productos_para_usuario()
         return jsonify({"fulfillmentText": respuesta})
 
-    # ---- RESPUESTA POR DEFECTO ----
-    else:
+    elif intent_nombre == "despedida":
+        return jsonify({"fulfillmentText": "¡Hasta luego! Gracias por visitar Frere's Collection 🌸"})
+
+    elif intent_nombre == "horario":
+        return jsonify({"fulfillmentText": "Nuestro horario de atención es de lunes a sábado, de 9 a.m. a 7 p.m."})
+
+    elif intent_nombre == "contacto":
+        return jsonify({"fulfillmentText": "Puedes escribirnos directamente por este medio o al WhatsApp 📱444 123 4567."})
+
+    elif intent_nombre == "Default Fallback Intent":
         return jsonify({"fulfillmentText": "Ups, no he entendido a qué te refieres. ¿Puedes intentarlo de otra forma?"})
 
-# ----------------------------
+    # Puedes seguir agregando aquí: iniciar_sesion, realizar_pedido, productos_nuevos, etc.
+
+    else:
+        return jsonify({"fulfillmentText": "Lo siento, no tengo una respuesta para eso aún."})
+
 # EJECUCIÓN LOCAL
-# ----------------------------
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
