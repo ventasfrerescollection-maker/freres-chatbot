@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 import os
 from registro_usuario import registrar_usuario
 from conexion_firebase import db  # Solo si deseas hacer consultas directas
-
+from flujo_pedido import formatear_productos_para_usuario
 app = Flask(__name__)
 
 # ----------------------------
@@ -41,7 +41,10 @@ def webhook_dialogflow():
     else:
         return jsonify({"fulfillmentText": "Ups, no he entendido a qué te refieres. ¿Puedes intentarlo de nuevo?"})
 
-
+    
+    elif intent_nombre == "VerCatalogo":
+        respuesta = formatear_productos_para_usuario()
+        return jsonify({"fulfillmentText": respuesta})
 # ----------------------------
 # EJECUCIÓN LOCAL (opcional)
 # ----------------------------
