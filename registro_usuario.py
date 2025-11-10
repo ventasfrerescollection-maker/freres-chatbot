@@ -1,10 +1,12 @@
 # registro_usuario.py
-from firebase_admin import firestore
 from datetime import datetime
-
-db = firestore.client()
+from conexion_firebase import db  # 🔥 Importa la conexión ya inicializada
 
 def registrar_usuario(telefono: str, nombre: str, direccion: str = "") -> str:
+    """
+    Registra un nuevo usuario en la colección 'usuarios' de Firestore.
+    Si el número ya existe, devuelve un mensaje indicando que ya está registrado.
+    """
     usuarios_ref = db.collection("usuarios")
     usuario_doc = usuarios_ref.document(telefono)
     
