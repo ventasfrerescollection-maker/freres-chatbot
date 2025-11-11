@@ -31,7 +31,8 @@ def webhook_dialogflow():
 
     elif intent_nombre == "catalogo":
         respuesta = formatear_productos_para_usuario()
-        return jsonify({"fulfillmentText": respuesta})
+        return jsonify({"fulfillmentMessages": respuesta})
+
 
     elif intent_nombre == "despedida":
         return jsonify({"fulfillmentText": "¡Hasta luego! Gracias por visitar Frere's Collection 🌸"})
