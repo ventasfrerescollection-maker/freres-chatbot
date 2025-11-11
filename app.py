@@ -52,5 +52,6 @@ def webhook_dialogflow():
 
 # EJECUCIÓN LOCAL
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))  # Render asigna un puerto automáticamente
+    app.run(host="0.0.0.0", port=port, debug=True)  # Escucha en todas las interfaces
 
