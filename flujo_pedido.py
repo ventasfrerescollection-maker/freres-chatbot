@@ -61,12 +61,35 @@ def crear_pedido(telefono_usuario, productos_solicitados, metodo_entrega="envio_
 # =============================
 def formatear_productos_para_usuario():
     productos = obtener_productos()
-    mensaje = "🛍 Productos disponibles:\n"
+    mensajes = []
+
+    if not productos:
+        return [{"text": {"text": ["No hay productos disponibles en este momento."]}}]
+
     for pid, p in productos.items():
-        nombre = p.get("nombre")
-        precio = p.get("precio")
+        nombre = p.get("nombre", "Producto")
+        precio = p.get("precio", "N/A")
         stock = p.get("stock", {}).get("Piezas", "0")
         imagen = p.get("imagen_url", "")
 
-        mensaje += f"\n🧸 {nombre}\n💵 ${precio} MXN\n📦 Stock: {stock} unidades\n🖼 Imagen: {imagen}\n"
-    return mensaje.strip()
+        # 🧾 Mensaje de texto
+        texto = f"🧸 {nombre}\n💵 ${precio} MXN\n📦 Stock: {stock} unidades"
+        mensajes.append({"text": {"text": [texto]}})
+
+        # 🖼 Imagen enriquecida (solo si hay URL válida)
+        if imagen.startswith("http"):
+            mensajes.append({
+                "payload": {
+                    "facebook": {
+                        "attachment": {
+                            "type": "image",
+                            "payload": {
+                                "url": imagen,
+                                "is_reusable": True
+                            }
+                        }
+                    }
+                }
+            })
+
+    return mensajes
