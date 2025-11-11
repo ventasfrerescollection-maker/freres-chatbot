@@ -53,8 +53,9 @@ def webhook_dialogflow():
 # EJECUCIÓN LOCAL
 # EJECUCIÓN COMPATIBLE CON RENDER
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # Render asigna el puerto dinámicamente
-    print(f"🚀 Servidor ejecutándose en el puerto {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    port = int(os.environ.get("PORT", 10000))
+    print(f"🚀 Servidor Flask ejecutándose en 0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
 
 
