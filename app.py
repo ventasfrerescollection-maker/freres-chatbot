@@ -51,7 +51,10 @@ def webhook_dialogflow():
         return jsonify({"fulfillmentText": "Lo siento, no tengo una respuesta para eso aún."})
 
 # EJECUCIÓN LOCAL
+# EJECUCIÓN COMPATIBLE CON RENDER
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render asigna un puerto automáticamente
-    app.run(host="0.0.0.0", port=port, debug=True)  # Escucha en todas las interfaces
+    port = int(os.environ.get("PORT", 10000))  # Render asigna el puerto dinámicamente
+    print(f"🚀 Servidor ejecutándose en el puerto {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
+
 
