@@ -22,12 +22,12 @@ import string
 import os
 from datetime import date, datetime
 
-# --- Importaciones de Dialogflow ---
+# --- ¡NUEVO! Importaciones de Dialogflow ---
 try:
     import google.cloud.dialogflow_v2 as dialogflow
     from google.api_core.exceptions import InvalidArgument
 except ImportError:
-    logging.critical("FATAL: Faltan librerías de Dialogflow. Ejecuta: pip install google-cloud-dialogflow")
+    logging.critical("FATAL: Faltan librerías de Dialogflow. ¿Están en requirements.txt?")
     dialogflow = None
 
 try:
@@ -48,12 +48,13 @@ logging.basicConfig(level=logging.INFO)
 VERIFY_TOKEN = "freres_verificacion"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 
-# --- Configuración de Dialogflow ---
+# --- ¡NUEVO! Configuración de Dialogflow ---
 DIALOGFLOW_PROJECT_ID = os.environ.get("DIALOGFLOW_PROJECT_ID")
-# GOOGLE_APPLICATION_CREDENTIALS se maneja automáticamente por Render
+# GOOGLE_APPLICATION_CREDENTIALS se maneja automáticamente por Render si subiste el JSON
 DIALOGFLOW_LANGUAGE_CODE = "es"
 
 if not PAGE_ACCESS_TOKEN or not DIALOGFLOW_PROJECT_ID:
+    # Este log aparecerá al inicio si faltan las variables
     logging.critical("FATAL: Faltan variables de entorno (PAGE_ACCESS_TOKEN o DIALOGFLOW_PROJECT_ID)")
 
 # ------------------------------------------------------------
@@ -140,7 +141,7 @@ def receive_message():
     return "EVENT_RECEIVED", 200
 
 # ------------------------------------------------------------
-# 3️⃣ WEBHOOK DE FULFILLMENT (La "Cocina" para Dialogflow)
+# ¡NUEVO! 3️⃣ RUTA DE FULFILLMENT (La "Cocina" para Dialogflow)
 # ------------------------------------------------------------
 @app.route("/dialogflow-fulfillment", methods=["POST"])
 def dialogflow_fulfillment():
@@ -173,9 +174,8 @@ def dialogflow_fulfillment():
                     mensaje += f"{i}. {cat}\n"
                 mensaje += "\n👉 Escribe el *nombre* o *número* de la colección que quieres ver ✨"
                 
-                # ¡FALTA GUARDAR ESTADO! No podemos hacerlo aquí.
-                # Esta es una limitación. La respuesta de Dialogflow es mejor
-                # si no requiere guardar un estado.
+                # NOTA: Este flujo es mejor manejarlo sin webhook
+                # porque necesita guardar un estado.
                 respuesta_texto = mensaje
             else:
                 respuesta_texto = "😕 No hay productos disponibles por ahora."
@@ -278,15 +278,15 @@ def manejar_mensaje(sender_id, message_text_original):
         # Manejamos intenciones "locales" que Dialogflow detecta
         # pero que no necesitan un webhook de fulfillment.
         
-        if intent_name == "Login":
+        if intent_name == "Login": # Asume que tienes una intención "Login"
             estado_ref.set({"estado": "esperando_telefono_login"})
             return "¡Perfecto! Escribe tu número de teléfono a 10 dígitos para iniciar sesión."
         
-        elif intent_name == "Registro":
+        elif intent_name == "Registro": # Asume que tienes una intención "Registro"
             estado_ref.set({"estado": "registro_pidiendo_nombre"})
             return "¡Genial! Empecemos tu registro. Por favor, escribe tu Nombre Completo."
 
-        elif intent_name == "Logout":
+        elif intent_name == "Logout": # Asume que tienes una intención "Logout"
             estado_ref.set({"estado": "inicio"}) # Borra la sesión
             return "Has cerrado sesión. Vuelve pronto."
         
@@ -384,8 +384,8 @@ def manejar_flujo_anonimo(estado_ref, estado, message_text_original):
 def detectar_intencion_dialogflow(session_id, texto):
     """
     Envía el texto del usuario a la API de Dialogflow y devuelve la respuesta.
+    Usa el sender_id de Messenger como session_id para Dialogflow
     """
-    # Usamos el sender_id de Messenger como session_id para Dialogflow
     session_client = dialogflow.SessionsClient()
     session = session_client.session_path(DIALOGFLOW_PROJECT_ID, session_id)
     
@@ -448,7 +448,6 @@ def enviar_imagen(id_usuario, imagen_url):
             logging.info(f"🖼️ Imagen enviada correctamente a {id_usuario}")
     except Exception as e:
         logging.exception(f"🔥 EXCEPCIÓN en requests.post (enviar_imagen): {e}")
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     print(f"🚀 Servidor Flask ejecutándose en 0.0.0.0:{port}")
