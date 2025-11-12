@@ -163,6 +163,7 @@ def dialogflow_fulfillment():
                 # === INTENT: Catálogo general o filtrado por categoría ===
               # === INTENT: Buscar categoría específica ===
                 # === INTENT: Mostrar categorías ===
+                # === INTENT: Mostrar categorías ===
         elif intent_name == "ver_categorias":
             try:
                 categorias = obtener_categorias_con_productos()
@@ -197,6 +198,7 @@ def dialogflow_fulfillment():
             except Exception as e:
                 logging.error(f"Error al buscar productos por categoría Firebase: {e}")
                 respuesta_texto = "Ocurrió un error al consultar los productos."
+
 
 
 
