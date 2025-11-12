@@ -159,29 +159,28 @@ def dialogflow_fulfillment():
                 # === INTENT: Catálogo general o por categoría ===
                 # === INTENT: Catálogo general o filtrado por categoría ===
               # === INTENT: Buscar categoría específica ===
+                # === INTENT: Mostrar categorías ===
+        elif intent_name == "ver_categorias":
+            try:
+                categorias = obtener_categorias_con_productos()
+                if categorias:
+                    mensaje = "🛍️ Estas son las categorías con productos disponibles:\n\n"
+                    for cat, total in categorias:
+                        mensaje += f"📂 {cat} ({total} productos)\n"
+                    respuesta_texto = mensaje.strip()
+                else:
+                    respuesta_texto = "😕 No hay categorías registradas con productos."
+            except Exception as e:
+                logging.error(f"Error al obtener categorías Firebase: {e}")
+                respuesta_texto = "Hubo un problema al consultar las categorías."
+
+        # === INTENT: Buscar productos por categoría ===
         elif intent_name in ["buscar_categoria", "catalogo"]:
             try:
-                categoria = parameters.get("categoria", "").capitalize().strip()
-                texto = texto_usuario.lower()
-
-                # Si no detectó parámetro, intenta deducirlo del texto mismo
-                if not categoria:
-                    posibles = ["juguetes", "bolsos", "ropa"]
-                    for palabra in posibles:
-                        if palabra in texto:
-                            categoria = palabra.capitalize()
-                            break
-
-                productos_ref = db.collection("productos")
-
-                # Filtrar por categoría si existe
-                if categoria:
-                    productos_ref = productos_ref.where("categoria", "==", categoria)
-
-                productos = [doc.to_dict() for doc in productos_ref.stream()]
-
+                categoria = parameters.get("categoria", "").capitalize()
+                productos = obtener_productos_por_categoria(categoria)
                 if productos:
-                    mensaje = f"🛍️ Productos en la categoría *{categoria or 'General'}*:\n\n"
+                    mensaje = f"🎨 Productos en la categoría {categoria}:\n\n"
                     for p in productos:
                         mensaje += (
                             f"🧸 {p.get('nombre','(Sin nombre)')}\n"
@@ -191,11 +190,11 @@ def dialogflow_fulfillment():
                         )
                     respuesta_texto = mensaje.strip()
                 else:
-                    respuesta_texto = f"😕 No encontré productos en la categoría *{categoria or 'general'}*."
-
+                    respuesta_texto = f"No encontré productos en la categoría {categoria}."
             except Exception as e:
-                logging.error(f"Error al buscar categoría: {e}")
-                respuesta_texto = "Hubo un problema al buscar los productos por categoría."
+                logging.error(f"Error al buscar productos por categoría Firebase: {e}")
+                respuesta_texto = "Ocurrió un error al consultar los productos."
+
 
 
 
