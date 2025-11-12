@@ -158,34 +158,35 @@ def dialogflow_fulfillment():
         # === INTENT: Catálogo general ===
                 # === INTENT: Catálogo general o por categoría ===
                 # === INTENT: Catálogo general o filtrado por categoría ===
-        if intent_name in ["catalogo", "productos_nuevos"]:
+              # === INTENT: Buscar categoría específica ===
+        elif intent_name in ["buscar_categoria", "catalogo"]:
             try:
                 categoria = parameters.get("categoria", "").capitalize().strip()
-                texto = texto_usuario.capitalize().strip()
+                texto = texto_usuario.lower()
 
-                # Si no hay parámetro, intenta deducirlo del texto
-                if not categoria and texto:
-                    categoria = texto
+                # Si no detectó parámetro, intenta deducirlo del texto mismo
+                if not categoria:
+                    posibles = ["juguetes", "bolsos", "ropa"]
+                    for palabra in posibles:
+                        if palabra in texto:
+                            categoria = palabra.capitalize()
+                            break
 
                 productos_ref = db.collection("productos")
 
-                # Filtrar por categoría si se detectó una
+                # Filtrar por categoría si existe
                 if categoria:
                     productos_ref = productos_ref.where("categoria", "==", categoria)
-
-                # Ordenar por fecha si es "productos_nuevos"
-                if intent_name == "productos_nuevos":
-                    productos_ref = productos_ref.order_by("fecha_alta", direction=firestore.Query.DESCENDING).limit(5)
 
                 productos = [doc.to_dict() for doc in productos_ref.stream()]
 
                 if productos:
-                    mensaje = f"🛍️ Productos en la categoría *{categoria or 'general'}*:\n\n"
+                    mensaje = f"🛍️ Productos en la categoría *{categoria or 'General'}*:\n\n"
                     for p in productos:
                         mensaje += (
-                            f"🧸 {p.get('nombre','Sin nombre')}\n"
+                            f"🧸 {p.get('nombre','(Sin nombre)')}\n"
                             f"💵 ${p.get('precio','N/D')} MXN\n"
-                            f"📦 {p.get('stock',{}).get('Piezas','0')} unidades\n"
+                            f"📦 Stock: {p.get('stock',{}).get('Piezas','0')} unidades\n"
                             f"🖼️ {p.get('imagen_url','')}\n\n"
                         )
                     respuesta_texto = mensaje.strip()
@@ -193,8 +194,9 @@ def dialogflow_fulfillment():
                     respuesta_texto = f"😕 No encontré productos en la categoría *{categoria or 'general'}*."
 
             except Exception as e:
-                logging.error(f"Error consultando catálogo/productos nuevos: {e}")
-                respuesta_texto = "Hubo un problema al consultar los productos."
+                logging.error(f"Error al buscar categoría: {e}")
+                respuesta_texto = "Hubo un problema al buscar los productos por categoría."
+
 
 
 
