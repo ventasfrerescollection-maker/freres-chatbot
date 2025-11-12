@@ -145,50 +145,117 @@ def receive_message():
 # ------------------------------------------------------------
 @app.route("/dialogflow-fulfillment", methods=["POST"])
 def dialogflow_fulfillment():
-    """
-    Esta ruta recibe las peticiones de FULFILLMENT de Dialogflow.
-    Aquí es donde haces tus consultas a FIREBASE.
-    """
     data = request.get_json(silent=True, force=True)
     if not data:
-        logging.error("FULFILLMENT: Error: Solicitud JSON inválida.")
-        return jsonify({"fulfillmentText": "Error: Solicitud JSON inválida."})
+        return jsonify({"fulfillmentText": "Error: Solicitud inválida."})
 
     try:
         intent_name = data['queryResult']['intent']['displayName']
-        parameters = data['queryResult']['parameters']
-        logging.info(f"FULFILLMENT: Intención recibida: {intent_name}")
+        parameters = data['queryResult'].get('parameters', {})
+        texto_usuario = data['queryResult'].get('queryText', "")
+        respuesta_texto = "No entendí bien tu solicitud."
 
-        respuesta_texto = "Lo siento, no pude procesar esa solicitud desde mi webhook."
-
-        # --- AQUÍ VA TU LÓGICA DE FIREBASE ---
-        
-        # EJEMPLO 1: El usuario pide ver el catálogo
-                # --- LÓGICA DE FIREBASE INTEGRADA CON DIALOGFLOW ---
+        # === INTENT: Catálogo general ===
         if intent_name == "catalogo":
-            # Intent para ver el catálogo o productos por categoría
-            categoria = parameters.get("categoria", "").capitalize().strip()
-            try:
-                productos_ref = db.collection("productos")
-                if categoria:
-                    productos_ref = productos_ref.where("categoria", "==", categoria)
-                docs = productos_ref.stream()
-                productos = [doc.to_dict() for doc in docs]
+            productos_ref = db.collection("productos").stream()
+            productos = [doc.to_dict() for doc in productos_ref]
+            if productos:
+                mensaje = "🛍️ Estos son algunos de nuestros productos:\n\n"
+                for p in productos:
+                    mensaje += f"🧸 {p.get('nombre','')}\n💵 ${p.get('precio','')} MXN\n📦 Stock: {p.get('stock',{}).get('Piezas','0')}\n🖼️ {p.get('imagen_url','')}\n\n"
+                respuesta_texto = mensaje.strip()
+            else:
+                respuesta_texto = "😕 No hay productos disponibles en este momento."
 
+        # === INTENT: Productos nuevos ===
+        elif intent_name == "productos_nuevos":
+            try:
+                productos_ref = db.collection("productos").order_by("fecha_alta", direction=firestore.Query.DESCENDING).limit(5)
+                productos = [doc.to_dict() for doc in productos_ref.stream()]
                 if productos:
-                    mensaje = f"🛍️ Productos {'de ' + categoria if categoria else 'disponibles'}:\n\n"
+                    mensaje = "🆕 Estos son los productos más recientes:\n\n"
                     for p in productos:
-                        nombre = p.get("nombre", "Sin nombre")
-                        precio = p.get("precio", "N/A")
-                        stock = p.get("stock", {}).get("Piezas", "0")
-                        imagen = p.get("imagen_url", "")
-                        mensaje += f"🧸 {nombre}\n💵 ${precio} MXN\n📦 Stock: {stock}\n🖼️ {imagen}\n\n"
+                        mensaje += f"✨ {p.get('nombre','')} - ${p.get('precio','')} MXN\n🖼️ {p.get('imagen_url','')}\n\n"
                     respuesta_texto = mensaje.strip()
                 else:
-                    respuesta_texto = f"😕 No encontré productos en la categoría *{categoria or 'general'}*."
+                    respuesta_texto = "Aún no hay productos nuevos registrados."
             except Exception as e:
-                logging.error(f"Error consultando catálogo: {e}")
-                respuesta_texto = "Hubo un problema al consultar los productos."
+                logging.error(f"Error en productos_nuevos: {e}")
+                respuesta_texto = "Ocurrió un error al consultar los productos nuevos."
+
+        # === INTENT: Búsqueda por color ===
+        elif intent_name == "Busqueda_color":
+            posibles_colores = ["rojo","azul","negro","blanco","verde","rosa","morado","dorado","plateado","beige"]
+            color = next((p.capitalize() for p in texto_usuario.split() if p.lower() in posibles_colores), None)
+            if not color:
+                respuesta_texto = "🎨 Dime el color que te gustaría buscar (por ejemplo: rojo, negro o dorado)."
+            else:
+                try:
+                    productos_ref = db.collection("productos").where("colores", "array_contains", color)
+                    productos = [doc.to_dict() for doc in productos_ref.stream()]
+                    if productos:
+                        mensaje = f"🎨 Productos disponibles en color {color}:\n\n"
+                        for p in productos:
+                            mensaje += f"🧸 {p.get('nombre','')} - ${p.get('precio','')} MXN\n🖼️ {p.get('imagen_url','')}\n\n"
+                        respuesta_texto = mensaje.strip()
+                    else:
+                        respuesta_texto = f"No encontré productos en color {color}."
+                except Exception as e:
+                    logging.error(f"Error buscando color: {e}")
+                    respuesta_texto = "Hubo un error al buscar los productos por color."
+
+        # === INTENT: Realizar pedido ===
+        elif intent_name == "realizar_pedido":
+            from flujo_pedido import crear_pedido
+            telefono_usuario = "sin_definir"
+            try:
+                resultado = crear_pedido(telefono_usuario, ["P001", "P002"])
+                respuesta_texto = resultado
+            except Exception as e:
+                logging.error(f"Error al crear pedido: {e}")
+                respuesta_texto = "Ocurrió un error al crear tu pedido."
+
+        # === INTENT: Registro ===
+        elif intent_name == "Registro":
+            respuesta_texto = "✍️ ¡Perfecto! Empecemos tu registro.\n¿Podrías decirme tu nombre completo?"
+
+        # === INTENT: Iniciar sesión ===
+        elif intent_name == "iniciar_sesion":
+            respuesta_texto = "🔐 Por favor, escribe tu número de teléfono a 10 dígitos para iniciar sesión."
+
+        # === INTENT: Horario ===
+        elif intent_name == "horario":
+            respuesta_texto = "🕒 Nuestro horario de atención es de lunes a sábado de 10 a.m. a 7 p.m., y domingos de 10 a.m. a 4 p.m."
+
+        # === INTENT: Contacto ===
+        elif intent_name == "contacto":
+            respuesta_texto = "📱 Puedes contactarnos por WhatsApp al +52 55 1234 5678 💬"
+
+        # === INTENT: Saludo ===
+        elif intent_name == "Saludo":
+            respuesta_texto = "👋 ¡Hola! Bienvenido(a) a Frere’s Collection. ¿En qué te puedo ayudar hoy? 💼✨"
+
+        # === INTENT: Despedida ===
+        elif intent_name == "despedida":
+            respuesta_texto = "💖 ¡Gracias por preferirnos! Estaré aquí cuando quieras ver más 👜✨"
+
+        # === INTENT: Cerrar sesión ===
+        elif intent_name == "cerrar_sesion":
+            respuesta_texto = "👋 Has cerrado sesión correctamente. ¡Vuelve pronto!"
+
+        # === INTENT: Fallback ===
+        elif intent_name == "Default Fallback Intent":
+            respuesta_texto = "😅 No entendí bien. ¿Podrías repetirlo de otra forma?"
+
+        # === RESPUESTA FINAL ===
+        return jsonify({
+            "fulfillmentMessages": [{"text": {"text": [respuesta_texto]}}]
+        })
+
+    except Exception as e:
+        logging.error(f"Error en fulfillment: {e}")
+        return jsonify({"fulfillmentText": "Error interno en el webhook."})
+
 
         elif intent_name == "productos_nuevos":
             # Intent para mostrar los últimos productos
