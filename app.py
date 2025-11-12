@@ -155,6 +155,9 @@ def dialogflow_fulfillment():
         texto_usuario = data['queryResult'].get('queryText', "")
         respuesta_texto = "No entendí bien tu solicitud."
 
+        # A partir de aquí empiezan los elif intent_name == ...
+
+
         # === INTENT: Catálogo general ===
                 # === INTENT: Catálogo general o por categoría ===
                 # === INTENT: Catálogo general o filtrado por categoría ===
