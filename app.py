@@ -156,16 +156,46 @@ def dialogflow_fulfillment():
         respuesta_texto = "No entendí bien tu solicitud."
 
         # === INTENT: Catálogo general ===
+                # === INTENT: Catálogo general o por categoría ===
         if intent_name == "catalogo":
-            productos_ref = db.collection("productos").stream()
-            productos = [doc.to_dict() for doc in productos_ref]
-            if productos:
-                mensaje = "🛍️ Estos son algunos de nuestros productos:\n\n"
-                for p in productos:
-                    mensaje += f"🧸 {p.get('nombre','')}\n💵 ${p.get('precio','')} MXN\n📦 Stock: {p.get('stock',{}).get('Piezas','0')}\n🖼️ {p.get('imagen_url','')}\n\n"
-                respuesta_texto = mensaje.strip()
-            else:
-                respuesta_texto = "😕 No hay productos disponibles en este momento."
+            try:
+                categoria = parameters.get("categoria", "").capitalize().strip()
+                if not categoria:
+                    # Si no hay parámetro, intenta deducirlo del texto
+                    texto_normalizado = texto_usuario.capitalize().strip()
+                    categoria = texto_normalizado
+
+                productos_ref = db.collection("productos")
+                # Si el usuario especificó una categoría, filtramos por ella
+                if categoria:
+                    productos_ref = productos_ref.where("categoria", "==", categoria)
+
+                productos = [doc.to_dict() for doc in productos_ref.stream()]
+
+                if productos:
+                    if categoria:
+                        mensaje = f"🛍️ Productos en la categoría *{categoria}*:\n\n"
+                    else:
+                        mensaje = "🛍️ Estos son algunos de nuestros productos:\n\n"
+
+                    for p in productos:
+                        nombre = p.get("nombre", "Sin nombre")
+                        precio = p.get("precio", "N/D")
+                        stock = p.get("stock", {}).get("Piezas", "0")
+                        imagen = p.get("imagen_url", "")
+                        mensaje += f"🧸 {nombre}\n💵 ${precio} MXN\n📦 Stock: {stock} unidades\n🖼️ {imagen}\n\n"
+
+                    respuesta_texto = mensaje.strip()
+                else:
+                    if categoria:
+                        respuesta_texto = f"😕 No encontré productos en la categoría *{categoria}*."
+                    else:
+                        respuesta_texto = "😕 No hay productos disponibles en este momento."
+
+            except Exception as e:
+                logging.error(f"Error consultando catálogo: {e}")
+                respuesta_texto = "Hubo un problema al consultar los productos."
+
 
         # === INTENT: Productos nuevos ===
         elif intent_name == "productos_nuevos":
