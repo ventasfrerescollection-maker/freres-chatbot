@@ -207,9 +207,8 @@ def dialogflow_fulfillment():
         # === INTENT: Realizar pedido ===
         elif intent_name == "realizar_pedido":
             from flujo_pedido import crear_pedido
-            telefono_usuario = "sin_definir"
             try:
-                resultado = crear_pedido(telefono_usuario, ["P001", "P002"])
+                resultado = crear_pedido("usuario_demo", ["P001", "P002"])
                 respuesta_texto = resultado
             except Exception as e:
                 logging.error(f"Error al crear pedido: {e}")
@@ -256,84 +255,6 @@ def dialogflow_fulfillment():
         logging.error(f"Error en fulfillment: {e}")
         return jsonify({"fulfillmentText": "Error interno en el webhook."})
 
-
-        elif intent_name == "productos_nuevos":
-            # Intent para mostrar los últimos productos
-            try:
-                productos_ref = db.collection("productos").order_by("fecha_alta", direction=firestore.Query.DESCENDING).limit(5)
-                docs = productos_ref.stream()
-                productos = [doc.to_dict() for doc in docs]
-                if productos:
-                    mensaje = "🆕 Últimos productos añadidos:\n\n"
-                    for p in productos:
-                        nombre = p.get("nombre", "Sin nombre")
-                        precio = p.get("precio", "N/A")
-                        imagen = p.get("imagen_url", "")
-                        mensaje += f"✨ {nombre} - ${precio} MXN\n🖼️ {imagen}\n\n"
-                    respuesta_texto = mensaje.strip()
-                else:
-                    respuesta_texto = "Aún no hay productos nuevos registrados."
-            except Exception as e:
-                logging.error(f"Error consultando productos nuevos: {e}")
-                respuesta_texto = "Ocurrió un problema al cargar los productos nuevos."
-
-        elif intent_name == "Busqueda_color":
-            # Intent para buscar productos por color
-            color = parameters.get("color", "").capitalize().strip()
-            if not color:
-                respuesta_texto = "Por favor, dime qué color estás buscando (por ejemplo: azul o rojo)."
-            else:
-                try:
-                    productos_ref = db.collection("productos").where("colores", "array_contains", color)
-                    docs = productos_ref.stream()
-                    productos = [doc.to_dict() for doc in docs]
-                    if productos:
-                        mensaje = f"🎨 Productos disponibles en color {color}:\n\n"
-                        for p in productos:
-                            nombre = p.get("nombre", "Sin nombre")
-                            precio = p.get("precio", "N/A")
-                            imagen = p.get("imagen_url", "")
-                            mensaje += f"🧸 {nombre} - ${precio} MXN\n🖼️ {imagen}\n\n"
-                        respuesta_texto = mensaje.strip()
-                    else:
-                        respuesta_texto = f"No encontré productos en color {color}."
-                except Exception as e:
-                    logging.error(f"Error buscando color: {e}")
-                    respuesta_texto = "Hubo un error al buscar los productos por color."
-
-        elif intent_name == "VerEstadoPedido":
-            # Ya existente: buscar pedido por ID
-            pedido_id = parameters.get("pedido-id")
-            if pedido_id:
-                try:
-                    pedido_doc = db.collection("pedidos").document(pedido_id).get()
-                    if pedido_doc.exists:
-                        datos_pedido = pedido_doc.to_dict()
-                        estado_pedido = datos_pedido.get("estado", "desconocido")
-                        monto_pedido = datos_pedido.get("monto_total", 0)
-                        respuesta_texto = f"🧾 Tu pedido {pedido_id} está *{estado_pedido}*, con un total de ${monto_pedido} MXN."
-                    else:
-                        respuesta_texto = f"No encontré un pedido con el ID {pedido_id}."
-                except Exception as fb_e:
-                    logging.error(f"Error Firebase pedido: {fb_e}")
-                    respuesta_texto = "Hubo un problema al consultar la base de datos."
-            else:
-                respuesta_texto = "Necesito el número o ID de tu pedido para buscarlo."
-
-        else:
-            respuesta_texto = "No tengo información específica para esa solicitud aún."
-
-        # Devolvemos la respuesta a Dialogflow
-        return jsonify({
-            "fulfillmentMessages": [
-                {"text": {"text": [respuesta_texto]}}
-            ]
-        })
-
-
-    except Exception as e:
-        logging.error(f"FULFILLMENT: Error al procesar JSON: {e}")
-        return jsonify({"fulfillmentText": "Error en el webhook. Revisa los logs del servidor."})
 
 
 # ------------------------------------------------------------
