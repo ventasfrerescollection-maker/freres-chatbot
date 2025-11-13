@@ -230,4 +230,6 @@ def enviar_imagen(id_usuario, imagen_url):
 # 5️⃣ EJECUCIÓN DEL SERVIDOR
 # ------------------------------------------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000, debug=False)
+    port = int(os.environ.get("PORT", 10000))
+    print(f"🔥 Servidor ejecutándose en {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
