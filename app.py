@@ -26,7 +26,15 @@ logging.basicConfig(level=logging.INFO)
 
 VERIFY_TOKEN = "freres_verificacion"
 
-PAGE_ACCESS_TOKEN = "PAGE_ACCESS_TOKEN"   # <-- reemplazar
+import os
+
+PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
+
+if not PAGE_ACCESS_TOKEN:
+    print("❌ ERROR: PAGE_ACCESS_TOKEN no está definido en Render.")
+else:
+    print("✅ PAGE_ACCESS_TOKEN cargado correctamente desde Render.")
+# <-- reemplazar
 
 # Diccionario de estados por usuario
 user_state = {}
