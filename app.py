@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO)
 
 VERIFY_TOKEN = "freres_verificacion"
 
-PAGE_ACCESS_TOKEN = "TU_TOKEN_DE_PAGINA_AQUI"   # <-- reemplazar
+PAGE_ACCESS_TOKEN = "PAGE_ACCESS_TOKEN"   # <-- reemplazar
 
 # Diccionario de estados por usuario
 user_state = {}
