@@ -1,18 +1,7 @@
 # ------------------------------------------------------------
 # ARCHIVO: app.py
 # PROYECTO: Chatbot de Messenger – Frere’s Collection
-# DESCRIPCIÓN:
-#   Chatbot 100% Python con:
-#   - Registro de usuarios
-#   - Inicio de sesión
-#   - Pedidos por ID
-#   - Catálogo conectado a Firestore
-#   - Sistema de estados
-#   - Fallback profesional
-#
-# AUTOR: Fernando Ortiz (versión extendida)
 # ------------------------------------------------------------
-
 
 from flask import Flask, request
 import requests
@@ -27,7 +16,7 @@ from conexion_firebase import obtener_productos
 import firebase_admin
 from firebase_admin import firestore
 
-# Firestore client
+# Cliente Firestore
 db = firestore.client()
 
 # ------------------------------------------------------------
@@ -45,6 +34,17 @@ else:
     print("✅ Token de página cargado correctamente.")
 
 # Estados de usuarios
+# Estructura típica:
+# {
+#   "estado": "inicio" | "registrando_nombre" | "logueado" | "elige_categoria" | "mostrando_producto" | ...
+#   "nombre": "...",
+#   "telefono": "...",
+#   "categorias_pendientes": [...],
+#   "categoria_actual": "...",
+#   "productos_categoria": [{"id": "123", "datos": {...}}, ...],
+#   "indice_producto": 0,
+#   "carrito": [ { "id": "123", "nombre": "...", "precio": 100, "categoria": "Bolsos" }, ... ]
+# }
 user_state = {}
 
 # ------------------------------------------------------------
@@ -82,6 +82,219 @@ def enviar_imagen(id_usuario, imagen_url):
         }
     }
     requests.post(url, json=payload)
+
+# ------------------------------------------------------------
+# AUXILIARES: CATEGORÍAS, PRODUCTOS, CARRITO, PEDIDOS
+# ------------------------------------------------------------
+def construir_categorias_y_guardar_en_estado(sender_id):
+    """
+    Obtiene las categorías desde Firebase y las guarda en el estado del usuario.
+    También prepara el carrito si no existe.
+    """
+    productos = obtener_productos()
+    categorias = {}
+
+    for p in productos.values():
+        cat = p.get("categoria", "Sin categoria")
+        categorias[cat] = categorias.get(cat, 0) + 1
+
+    categorias_lista = list(categorias.keys())
+
+    if sender_id not in user_state:
+        user_state[sender_id] = {}
+
+    user_state[sender_id].setdefault("carrito", [])
+    user_state[sender_id]["estado"] = "elige_categoria"
+    user_state[sender_id]["categorias_pendientes"] = categorias_lista
+
+    if not categorias_lista:
+        return "😕 No hay productos en este momento."
+
+    msg = "🛍️ *Categorías con productos:*\n\n"
+    for i, cat in enumerate(categorias_lista, 1):
+        msg += f"{i}. {cat}\n"
+
+    msg += "\n👉 Escribe el número o el nombre de la categoría que quieres ver."
+    return msg
+
+def preparar_productos_de_categoria(sender_id, categoria):
+    """
+    Llena en user_state la lista de productos de la categoría elegida
+    y posiciona el índice en el primer producto.
+    """
+    productos = obtener_productos()
+    lista = []
+
+    for id_prod, datos in productos.items():
+        if datos.get("categoria", "").lower() == categoria.lower():
+            lista.append({"id": id_prod, "datos": datos})
+
+    user_state[sender_id]["categoria_actual"] = categoria
+    user_state[sender_id]["productos_categoria"] = lista
+    user_state[sender_id]["indice_producto"] = 0
+
+    if not lista:
+        return False
+    return True
+
+def mostrar_producto_actual(sender_id):
+    """
+    Devuelve el texto para mostrar el producto actual de la categoría.
+    Si ya no hay más productos en la categoría, pasa a manejar el fin de categoría.
+    """
+    estado = user_state.get(sender_id, {})
+    productos_cat = estado.get("productos_categoria", [])
+    indice = estado.get("indice_producto", 0)
+
+    if indice >= len(productos_cat):
+        # Ya no hay productos en esta categoría
+        return manejar_fin_de_categoria(sender_id)
+
+    prod_info = productos_cat[indice]
+    pid = prod_info["id"]
+    datos = prod_info["datos"]
+
+    nombre = datos.get("nombre", "Sin nombre")
+    precio = datos.get("precio", "N/A")
+    img = datos.get("imagen_url", "")
+
+    texto = (
+        f"🔹 *{nombre}*\n"
+        f"💰 ${precio} MXN\n"
+        f"🆔 ID: {pid}\n\n"
+        "Para agregarlo al pedido, puedes escribir:\n"
+        f"• *pedido {pid}*\n"
+        f"• *si {pid}*\n"
+        f"• Solo el ID: *{pid}*\n"
+        "O escribe *no* para ver el siguiente producto.\n"
+        "También puedes escribir *finalizar pedido* para cerrar tu compra."
+    )
+
+    # Enviar imagen si existe
+    if img:
+        enviar_imagen(sender_id, img)
+
+    return texto
+
+def manejar_fin_de_categoria(sender_id):
+    """
+    Se llama cuando ya no hay más productos en la categoría actual.
+    Pregunta si quiere ver otra categoría o finalizar pedido.
+    Si no quedan categorías y hay carrito -> finaliza pedido.
+    Si no quedan categorías ni carrito -> vuelve a logueado.
+    """
+    estado = user_state.get(sender_id, {})
+    cat_actual = estado.get("categoria_actual", "esa categoría")
+
+    # Quitar categoría actual de pendientes
+    categorias_pendientes = estado.get("categorias_pendientes", [])
+    if cat_actual in categorias_pendientes:
+        categorias_pendientes.remove(cat_actual)
+    user_state[sender_id]["categorias_pendientes"] = categorias_pendientes
+
+    carrito = estado.get("carrito", [])
+
+    if categorias_pendientes:
+        msg = (
+            f"✅ Ya no hay más productos en *{cat_actual}*.\n\n"
+            "¿Quieres ver otra categoría?\n\n"
+            "Categorías restantes:\n"
+        )
+        for i, cat in enumerate(categorias_pendientes, 1):
+            msg += f"{i}. {cat}\n"
+        msg += "\n👉 Escribe el número o el nombre de la categoría.\n"
+        msg += "O escribe *finalizar pedido* para cerrar tu compra."
+        user_state[sender_id]["estado"] = "elige_categoria"
+        return msg
+    else:
+        # No hay más categorías
+        if carrito:
+            return finalizar_pedido(sender_id)
+        else:
+            user_state[sender_id]["estado"] = "logueado"
+            return (
+                "😕 Ya no quedan categorías con productos y no agregaste nada al carrito.\n"
+                "Si quieres, escribe *catalogo* para ver de nuevo."
+            )
+
+def agregar_producto_a_carrito(sender_id, id_prod):
+    """
+    Agrega un producto al carrito del usuario si existe en la base.
+    Devuelve un texto de confirmación o error.
+    """
+    productos = obtener_productos()
+    if id_prod not in productos:
+        return "❌ No encontré un producto con ese ID."
+
+    datos = productos[id_prod]
+    nombre = datos.get("nombre", "Sin nombre")
+    precio = datos.get("precio", 0)
+    categoria = datos.get("categoria", "Sin categoria")
+
+    if sender_id not in user_state:
+        user_state[sender_id] = {}
+
+    user_state[sender_id].setdefault("carrito", [])
+    user_state[sender_id]["carrito"].append({
+        "id": id_prod,
+        "nombre": nombre,
+        "precio": precio,
+        "categoria": categoria
+    })
+
+    return f"🛒 Se agregó *{nombre}* (ID: {id_prod}) a tu pedido."
+
+def finalizar_pedido(sender_id):
+    """
+    Cierra el pedido: lo guarda en Firestore con un ID y regresa
+    un resumen + el ID de pedido.
+    """
+    estado = user_state.get(sender_id, {})
+    carrito = estado.get("carrito", [])
+    telefono = estado.get("telefono", "N/D")
+    nombre = estado.get("nombre", "Cliente")
+
+    if not carrito:
+        return "🛍 No tienes productos en tu pedido. Escribe *catalogo* para ver productos."
+
+    # Calcular total (si los precios son numéricos)
+    total = 0
+    for item in carrito:
+        try:
+            total += float(item.get("precio", 0))
+        except Exception:
+            pass
+
+    pedido_data = {
+        "telefono": telefono,
+        "nombre": nombre,
+        "fecha": datetime.now(),
+        "estado": "pendiente",
+        "productos": carrito,
+        "total": total
+    }
+
+    doc_ref, _ = db.collection("pedidos").add(pedido_data)
+    pedido_id = doc_ref.id
+
+    # Limpiar carrito y estados de categorías
+    user_state[sender_id]["carrito"] = []
+    user_state[sender_id]["categorias_pendientes"] = []
+    user_state[sender_id]["categoria_actual"] = None
+    user_state[sender_id]["productos_categoria"] = []
+    user_state[sender_id]["indice_producto"] = 0
+    user_state[sender_id]["estado"] = "logueado"
+
+    msg = "✅ Tu pedido ha sido registrado.\n\n"
+    msg += f"🧾 *ID de pedido:* {pedido_id}\n\n"
+    msg += "📦 Productos:\n"
+    for item in pedido_data["productos"]:
+        msg += f"• {item['nombre']} (ID: {item['id']}) – ${item['precio']} MXN\n"
+
+    msg += f"\n💵 Total aproximado: ${total} MXN\n"
+    msg += "\nGuarda este ID para consultar tu pedido más adelante."
+
+    return msg
 
 # ------------------------------------------------------------
 # 1️⃣ VERIFICACIÓN WEBHOOK
@@ -125,7 +338,6 @@ def receive_message():
 # ------------------------------------------------------------
 def manejar_mensaje(sender_id, message):
 
-    # Obtener estado REAL
     estado = user_state.get(sender_id, {}).get("estado", "inicio")
 
     # --------------------------------------------------------
@@ -135,9 +347,9 @@ def manejar_mensaje(sender_id, message):
         return (
             "👋 ¡Hola! Bienvenida a *Frere’s Collection* 💅👜\n"
             "Puedo ayudarte con:\n"
-            "🛍️ *Catálogo*\n"
+            "🛍️ *Catalogo*\n"
             "📝 *Registrar*\n"
-            "🔐 *Iniciar sesión*\n"
+            "🔐 *Iniciar sesion*\n"
             "🕒 *Horario*\n"
             "📞 *Contacto*"
         )
@@ -171,7 +383,6 @@ def manejar_mensaje(sender_id, message):
     if estado == "registrando_telefono":
         if not message.isdigit() or len(message) != 10:
             return "❌ El teléfono debe tener 10 dígitos."
-
         user_state[sender_id]["telefono"] = message
         user_state[sender_id]["estado"] = "registrando_direccion"
         return "📍 Perfecto. ¿Cuál es tu dirección completa?"
@@ -182,135 +393,160 @@ def manejar_mensaje(sender_id, message):
         telefono = user_state[sender_id]["telefono"]
         direccion = message
 
-        # Guardar en Firebase
         db.collection("usuarios").document(telefono).set({
             "nombre": nombre,
             "telefono": telefono,
             "direccion": direccion
         })
 
-        user_state[sender_id] = {
-            "estado": "logueado",
-            "telefono": telefono,
-            "nombre": nombre
-        }
+        user_state[sender_id]["estado"] = "logueado"
+        user_state[sender_id]["nombre"] = nombre
 
-        return f"✨ ¡Registro completado, {nombre}! Ya puedes hacer pedidos."
+        # Al terminar registro, iniciamos flujo de categorías
+        msg_categorias = construir_categorias_y_guardar_en_estado(sender_id)
+        return f"✨ ¡Registro completado, {nombre}! Ya puedes hacer pedidos.\n\n{msg_categorias}"
 
     # --------------------------------------------------------
     # LOGIN
     # --------------------------------------------------------
-    if "iniciar sesion" in message or "entrar" in message:
+    if "iniciar sesion" in message or message == "entrar":
         user_state[sender_id] = {"estado": "login_telefono"}
         return "🔐 Escribe tu número telefónico registrado."
 
     if estado == "login_telefono":
         doc = db.collection("usuarios").document(message).get()
         if not doc.exists:
-            return "❌ Ese número no está registrado. Escribe *registrar*."
+            return "❌ Ese número no está registrado. Escribe *registrar* para crear una cuenta."
 
         info = doc.to_dict()
         user_state[sender_id] = {
             "estado": "logueado",
             "telefono": message,
-            "nombre": info.get("nombre", "Usuario")
+            "nombre": info.get("nombre", "Cliente")
         }
 
-        return f"✨ Bienvenido de nuevo, {info.get('nombre')}."
+        msg_categorias = construir_categorias_y_guardar_en_estado(sender_id)
+        return f"✨ Bienvenido de nuevo, {info.get('nombre')}.\n\n{msg_categorias}"
 
     # --------------------------------------------------------
-    # CATÁLOGO
+    # CATÁLOGO MANUAL
     # --------------------------------------------------------
-    if "catalogo" in message or "catálogo" in message:
-        productos = obtener_productos()
-        categorias = {}
-
-        for p in productos.values():
-            cat = p.get("categoria", "Sin categoria")
-            categorias[cat] = categorias.get(cat, 0) + 1
-
-        msg = "🛍️ *Categorías disponibles:*\n\n"
-        for i, (cat, cant) in enumerate(categorias.items(), 1):
-            msg += f"{i}. {cat} ({cant})\n"
-
-        msg += "\n👉 Escribe el número o nombre de la categoría."
-
-        user_state[sender_id] = {
-            "estado": "esperando_categoria",
-            "categorias": list(categorias.keys())
-        }
-        return msg
+    if "catalogo" in message or "catalogo" in message:
+        # Si está logueado, mostramos categorías con flujo de carrito
+        if user_state.get(sender_id, {}).get("estado") == "logueado":
+            return construir_categorias_y_guardar_en_estado(sender_id)
+        else:
+            # No logueado: solo mostrar categorías, pero sin carrito
+            return construir_categorias_y_guardar_en_estado(sender_id)
 
     # --------------------------------------------------------
-    # MOSTRAR PRODUCTOS POR CATEGORÍA
+    # ELECCIÓN DE CATEGORÍA (DESPUÉS DE LOGIN/REGISTRO)
     # --------------------------------------------------------
-    if estado == "esperando_categoria":
-        categorias = user_state[sender_id]["categorias"]
-        productos = obtener_productos()
+    if estado == "elige_categoria":
+        estado_user = user_state.get(sender_id, {})
+        categorias_pend = estado_user.get("categorias_pendientes", [])
 
-        # Número de categoría
+        if not categorias_pend:
+            return "😕 No hay categorías disponibles ahora mismo."
+
+        # El usuario puede responder con número o con texto
+        categoria = None
+
         if message.isdigit():
             idx = int(message) - 1
-            if 0 <= idx < len(categorias):
-                categoria = categorias[idx]
-            else:
-                return "❌ Número inválido."
+            if 0 <= idx < len(categorias_pend):
+                categoria = categorias_pend[idx]
         else:
-            categoria = next((c for c in categorias if c.lower() in message), None)
+            for cat in categorias_pend:
+                if cat.lower() in message:
+                    categoria = cat
+                    break
 
         if not categoria:
-            return "❌ Categoría no reconocida."
+            return "❌ No reconocí esa categoría. Escribe el número o el nombre que aparece en la lista."
 
-        enviar_mensaje(sender_id, f"👜 *Productos en {categoria}:*")
+        # Preparar productos de esa categoría
+        tiene_productos = preparar_productos_de_categoria(sender_id, categoria)
+        if not tiene_productos:
+            return f"😕 No se encontraron productos en la categoría *{categoria}*."
 
-        for id_prod, datos in productos.items():
-            if datos.get("categoria", "").lower() == categoria.lower():
-                nombre = datos.get("nombre", "Sin nombre")
-                precio = datos.get("precio", "N/A")
-                img = datos.get("imagen_url", "")
-
-                enviar_mensaje(sender_id, f"🔹 *{nombre}*\n💰 ${precio} MXN\nID: {id_prod}")
-
-                if img:
-                    enviar_imagen(sender_id, img)
-
-        user_state[sender_id]["estado"] = "logueado"
-        return "✨ Escribe *pedido 1234* para pedir un producto por ID."
+        user_state[sender_id]["estado"] = "mostrando_producto"
+        return mostrar_producto_actual(sender_id)
 
     # --------------------------------------------------------
-    # PEDIDO POR ID
+    # MOSTRANDO PRODUCTO (AGREGAR / SIGUIENTE / FINALIZAR)
+    # --------------------------------------------------------
+    if estado == "mostrando_producto":
+        # Finalizar pedido directo
+        if "finalizar pedido" in message or message == "finalizar":
+            return finalizar_pedido(sender_id)
+
+        # Saltar producto (no)
+        if message in ["no", "siguiente"]:
+            user_state[sender_id]["indice_producto"] = user_state[sender_id].get("indice_producto", 0) + 1
+            return mostrar_producto_actual(sender_id)
+
+        # Intentos de agregar producto al carrito
+        tokens = message.split()
+        id_para_agregar = None
+
+        # 1) "pedido 123"
+        if message.startswith("pedido"):
+            if len(tokens) >= 2 and tokens[1].isdigit():
+                id_para_agregar = tokens[1]
+            else:
+                # Si no hay ID, tomar el producto actual
+                est = user_state.get(sender_id, {})
+                productos_cat = est.get("productos_categoria", [])
+                idx = est.get("indice_producto", 0)
+                if 0 <= idx < len(productos_cat):
+                    id_para_agregar = productos_cat[idx]["id"]
+
+        # 2) "si 123" o "sí 123"
+        elif tokens[0] in ["si", "si,", "si."]:
+            if len(tokens) >= 2 and tokens[1].isdigit():
+                id_para_agregar = tokens[1]
+            else:
+                # si solo escribe "si", tomar producto actual
+                est = user_state.get(sender_id, {})
+                productos_cat = est.get("productos_categoria", [])
+                idx = est.get("indice_producto", 0)
+                if 0 <= idx < len(productos_cat):
+                    id_para_agregar = productos_cat[idx]["id"]
+
+        # 3) solo el ID (ej: "1023")
+        elif message.isdigit():
+            id_para_agregar = message
+
+        if id_para_agregar:
+            confirm = agregar_producto_a_carrito(sender_id, id_para_agregar)
+            # Pasar al siguiente producto automáticamente
+            user_state[sender_id]["indice_producto"] = user_state[sender_id].get("indice_producto", 0) + 1
+            siguiente = mostrar_producto_actual(sender_id)
+            return f"{confirm}\n\n{siguiente}"
+
+        # Si nada de lo anterior encaja:
+        return (
+            "🤔 No te entendí en esta parte.\n"
+            "Puedes escribir *pedido ID*, *si ID*, solo el *ID*, o *no* para ver el siguiente producto.\n"
+            "También *finalizar pedido* para cerrar tu compra."
+        )
+
+    # --------------------------------------------------------
+    # PEDIDO DIRECTO POR ID (FUERA DEL FLUJO)
     # --------------------------------------------------------
     if message.startswith("pedido"):
-        partes = message.split()
+        estado_user = user_state.get(sender_id, {})
+        if estado_user.get("estado") != "logueado":
+            return "🔐 Necesitas iniciar sesión para hacer un pedido. Escribe *iniciar sesion*."
 
-        if len(partes) < 2:
+        tokens = message.split()
+        if len(tokens) < 2:
             return "🛒 Escribe así: *pedido 1023*"
 
-        id_prod = partes[1]
-
-        estado = user_state.get(sender_id, {})
-        if estado.get("estado") != "logueado":
-            return "🔐 Necesitas iniciar sesión."
-
-        telefono = estado["telefono"]
-        nombre = estado["nombre"]
-
-        productos = obtener_productos()
-
-        if id_prod not in productos:
-            return "❌ No existe un producto con ese ID."
-
-        prod = productos[id_prod]
-
-        # Guardar pedido
-        db.collection("pedidos").add({
-            "telefono": telefono,
-            "id_producto": id_prod,
-            "fecha": datetime.now(),
-            "estado": "pendiente"
-        })
-
-        return f"✔ Pedido registrado para *{prod['nombre']}*.\nGracias {nombre}, te contactaremos pronto."
+        id_prod = tokens[1]
+        confirm = agregar_producto_a_carrito(sender_id, id_prod)
+        return f"{confirm}\n\nSi quieres finalizar, escribe *finalizar pedido* o mira más productos con *catalogo*."
 
     # --------------------------------------------------------
     # FALLBACK PROFESIONAL
@@ -318,13 +554,12 @@ def manejar_mensaje(sender_id, message):
     return (
         "🤔 No entendí muy bien…\n\n"
         "Puedo ayudarte con:\n"
-        "🛍️ *Catálogo*\n"
+        "🛍️ *Catalogo*\n"
         "📝 *Registrar*\n"
-        "🔐 *Iniciar sesión*\n"
+        "🔐 *Iniciar sesion*\n"
         "🕒 *Horario*\n"
         "📞 *Contacto*"
     )
-
 
 # ------------------------------------------------------------
 # 5️⃣ EJECUCIÓN DEL SERVIDOR
