@@ -333,19 +333,41 @@ def receive_message():
 # ------------------------------------------------------------
 def manejar_mensaje(sender_id, msg):
     estado = user_state.get(sender_id, {}).get("estado", "inicio")
+    # -----------------------------------------
+    # DETECCIÓN UNIVERSAL DE FINALIZAR PEDIDO
+    # -----------------------------------------
+    if any(x in msg for x in ["finalizar", "finalizar pedido", "cerrar pedido", "terminar", "fin", "ya"]):
+        estado_u = user_state.get(sender_id, {})
+        carrito = estado_u.get("carrito", [])
+    
+        # Si ya tiene productos -> finalizar
+        if carrito:
+            return finalizar_pedido(sender_id)
+    
+        # No tiene productos -> mensaje de advertencia
+        return "🛍 Tu carrito está vacío. Agrega al menos un producto antes de finalizar."
+
 
     # ---------------- SALUDO ----------------
-    if any(x in msg for x in ["hola", "buenas", "hello"]):
+        if any(x in msg for x in ["hola", "buenas", "hello"]):
         return (
             "👋 Hola, soy Frere’s Collection.\n\n"
             "Puedo ayudarte con:\n"
             "🛍 Catalogo\n"
             "📝 Registrar\n"
             "🔐 Iniciar sesion\n"
+            "📦 Consultar pedido\n"
             "🕒 Horario\n"
             "📞 Contacto"
         )
-
+        if msg.startswith("ver pedido") or msg.startswith("consultar pedido") or msg.startswith("estado pedido"):
+            partes = msg.split()
+            if len(partes) < 3:
+                return "Para consultar escribe: *ver pedido ID*"
+            pid = partes[2]
+            ped = consultar_pedido_por_id(pid)
+            if not ped:
+                return "❌ No encontré ese pedido."
     # ---------------- CONTACTO ----------------
     if "contacto" in msg or "whatsapp" in msg:
         return "📱 WhatsApp: *+52 55 1234 5678*"
