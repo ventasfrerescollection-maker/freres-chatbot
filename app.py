@@ -349,7 +349,7 @@ def manejar_mensaje(sender_id, msg):
 
 
     # ---------------- SALUDO ----------------
-        if any(x in msg for x in ["hola", "buenas", "hello"]):
+    if any(x in msg for x in ["hola", "buenas", "hello"]):
         return (
             "👋 Hola, soy Frere’s Collection.\n\n"
             "Puedo ayudarte con:\n"
@@ -360,7 +360,7 @@ def manejar_mensaje(sender_id, msg):
             "🕒 Horario\n"
             "📞 Contacto"
         )
-        if msg.startswith("ver pedido") or msg.startswith("consultar pedido") or msg.startswith("estado pedido"):
+    if msg.startswith("ver pedido") or msg.startswith("consultar pedido") or msg.startswith("estado pedido"):
             partes = msg.split()
             if len(partes) < 3:
                 return "Para consultar escribe: *ver pedido ID*"
