@@ -129,7 +129,7 @@ def preparar_categoria(sender_id, categoria):
 
 def mostrar_producto(sender_id):
     """
-    Muestra el producto actual de la categoría; si no hay más, pasa a fin_categoria.
+    Muestra el producto actual de la categoría; si no hay más, pasa a ategoria.
     """
     estado = user_state.get(sender_id, {})
     productos = estado.get("productos_categoria", [])
@@ -165,17 +165,36 @@ def mostrar_producto(sender_id):
 
 
 def fin_categoria(sender_id):
-    """
-    Maneja el caso cuando ya no hay más productos en la categoría actual.
-    """
     estado = user_state[sender_id]
+
+    # -----------------------------------------
+    # FIX: Permitir finalizar pedido aun si ya
+    # no hay productos y el bot cambia de estado.
+    # -----------------------------------------
+    ultimo = estado.get("ultimo_mensaje", "")
+
+    if (
+        "finalizar" in ultimo
+        or "finalizar pedido" in ultimo
+        or "cerrar pedido" in ultimo
+        or "terminar" in ultimo
+        or "fin" in ultimo
+        or "ya" in ultimo
+    ):
+        return finalizar_pedido(sender_id)
+
+    # -----------------------------------------
+    # Lógica normal cuando no está finalizando
+    # -----------------------------------------
     cat_actual = estado.get("categoria_actual")
     pendientes = estado.get("categorias_pendientes", [])
     carrito = estado.get("carrito", [])
 
+    # Eliminar categoría actual
     if cat_actual in pendientes:
         pendientes.remove(cat_actual)
 
+    # Quedan más categorías
     if pendientes:
         estado["estado"] = "elige_categoria"
         msg = f"✔ Ya no hay más productos en *{cat_actual}*.\n\n"
@@ -184,15 +203,18 @@ def fin_categoria(sender_id):
             msg += f"{i}. {c}\n"
         msg += "\n👉 Escribe la siguiente categoría o *finalizar pedido*."
         return msg
-    else:
-        if carrito:
-            return finalizar_pedido(sender_id)
-        else:
-            estado["estado"] = "logueado"
-            return (
-                "No hay más categorías con productos y no agregaste nada al carrito.\n"
-                "Escribe *catalogo* para empezar de nuevo."
-            )
+
+    # No quedan categorías, pero sí carrito
+    if carrito:
+        return finalizar_pedido(sender_id)
+
+    # No hay carrito ni más categorías
+    estado["estado"] = "logueado"
+    return (
+        "No hay más categorías y no agregaste ningún producto.\n"
+        "Escribe *catalogo* para comenzar de nuevo."
+    )
+
 
 
 def agregar_carrito(sender_id, pid):
