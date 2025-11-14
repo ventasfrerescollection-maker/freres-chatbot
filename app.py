@@ -429,8 +429,17 @@ def manejar_mensaje(sender_id, msg):
     if estado == "mostrando_producto":
 
         # FINALIZAR
-        if "finalizar" in msg or "cerrar pedido" in msg:
-            return finalizar_pedido(sender_id)
+        # FINALIZAR PEDIDO (todas las variantes)
+if (
+    msg in ["finalizar", "finalizar pedido", "cerrar pedido", "terminar", "ya", "fin"]
+    or "finalizar" in msg 
+    or "cerrar pedido" in msg
+    or "terminar" in msg
+    or "finaliza" in msg
+    or "cerralo" in msg
+    or "cerrar" in msg
+):
+    return finalizar_pedido(sender_id)
 
         # SIGUIENTE
         if msg in ["no", "siguiente", "next", "n", "skip"]:
