@@ -319,7 +319,8 @@ def receive_message():
                 sender_id = event["sender"]["id"]
                 texto = event["message"].get("text", "")
                 msg_norm = normalizar(texto)
-
+                user_state.setdefault(sender_id, {})
+                user_state[sender_id]["ultimo_mensaje"] = msg_norm
                 resp = manejar_mensaje(sender_id, msg_norm)
                 if resp:
                     enviar_mensaje(sender_id, resp)
