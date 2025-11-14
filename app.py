@@ -201,6 +201,7 @@ def agregar_carrito(sender_id, pid):
 def finalizar_pedido(sender_id):
     estado = user_state[sender_id]
     carrito = estado.get("carrito", [])
+
     if not carrito:
         return "🛍 No tienes productos. Escribe *catalogo*."
 
@@ -220,9 +221,16 @@ def finalizar_pedido(sender_id):
         "total": total
     }
 
-    doc_ref, _ = db.collection("pedidos").add(pedido)
-    pedido_id = doc_ref.id
+    # 💥 FIX AQUÍ 💥
+    doc_ref = db.collection("pedidos").add(pedido)
 
+    # Manejo universal del return de .add()
+    if isinstance(doc_ref, tuple):
+        pedido_id = doc_ref[0].id
+    else:
+        pedido_id = doc_ref.id
+
+    # Guardar en estado para paso final de entrega
     user_state[sender_id]["estado"] = "elige_entrega"
     user_state[sender_id]["ultimo_pedido_id"] = pedido_id
 
@@ -234,6 +242,7 @@ def finalizar_pedido(sender_id):
         "Escribe una opción."
     )
     return msg
+
 
 
 # ------------------------------------------------------------
