@@ -412,7 +412,7 @@ if estado == "mostrando_producto":
     # Siguiente producto
     if msg in ["no", "siguiente", "next", "n", "skip"]:
         user_state[sender_id]["indice_producto"] += 1
-        return mostrar_producto(sender_id)
+            return mostrar_producto(sender_id)
 
     tokens = msg.split()
     pid = None
