@@ -425,59 +425,66 @@ def manejar_mensaje(sender_id, msg):
         user_state[sender_id]["estado"] = "mostrando_producto"
         return mostrar_producto(sender_id)
 
-    # ---------------- MOSTRAR PRODUCTO / CARRITO ----------------
-    if estado == "mostrando_producto":
+   # ---------------- MOSTRAR PRODUCTO / CARRITO ----------------
+if estado == "mostrando_producto":
 
-        # FINALIZAR
-        # FINALIZAR PEDIDO (todas las variantes)
-if (
-    msg in ["finalizar", "finalizar pedido", "cerrar pedido", "terminar", "ya", "fin"]
-    or "finalizar" in msg 
-    or "cerrar pedido" in msg
-    or "terminar" in msg
-    or "finaliza" in msg
-    or "cerralo" in msg
-    or "cerrar" in msg
-):
-    return finalizar_pedido(sender_id)
+    # FINALIZAR PEDIDO (todas las variantes posibles)
+    if (
+        msg in [
+            "finalizar", "finalizar pedido", "cerrar pedido",
+            "terminar", "ya", "fin"
+        ]
+        or "finalizar" in msg
+        or "cerrar pedido" in msg
+        or "cerrar" in msg
+        or "terminar" in msg
+        or "finaliza" in msg
+        or "finaliza pedido" in msg
+        or "completar" in msg
+        or "completar pedido" in msg
+        or "listo" in msg
+        or "ya esta" in msg
+        or "ya es todo" in msg
+    ):
+        return finalizar_pedido(sender_id)
 
-        # SIGUIENTE
-        if msg in ["no", "siguiente", "next", "n", "skip"]:
-            user_state[sender_id]["indice_producto"] += 1
-            return mostrar_producto(sender_id)
+    # SIGUIENTE PRODUCTO
+    if msg in ["no", "siguiente", "next", "n", "skip"]:
+        user_state[sender_id]["indice_producto"] += 1
+        return mostrar_producto(sender_id)
 
-        # AGREGAR PRODUCTO
-        tokens = msg.split()
-        pid = None
+    # AGREGAR PRODUCTO
+    tokens = msg.split()
+    pid = None
 
-        # si 123, sí 123
-        if tokens[0] in ["si", "sí", "si,", "si.", "sí,", "sí."]:
-            if len(tokens) > 1 and tokens[1].isdigit():
-                pid = tokens[1]
-            else:
-                # si solo dice "si"
-                productos = user_state[sender_id]["productos_categoria"]
-                idx = user_state[sender_id]["indice_producto"]
-                if idx < len(productos):
-                    pid = productos[idx]["id"]
-
-        # pedido 123
-        elif tokens[0] == "pedido" and len(tokens) > 1:
+    # si 123, sí 123
+    if tokens[0] in ["si", "sí", "si,", "si.", "sí,", "sí."]:
+        if len(tokens) > 1 and tokens[1].isdigit():
             pid = tokens[1]
+        else:
+            productos = user_state[sender_id]["productos_categoria"]
+            idx = user_state[sender_id]["indice_producto"]
+            if idx < len(productos):
+                pid = productos[idx]["id"]
 
-        # solo id
-        elif msg.isdigit():
-            pid = msg
+    # pedido 123
+    elif tokens[0] == "pedido" and len(tokens) > 1:
+        pid = tokens[1]
 
-        if pid:
-            confirm = agregar_carrito(sender_id, pid)
-            user_state[sender_id]["indice_producto"] += 1
-            return confirm + "\n\n" + mostrar_producto(sender_id)
+    # solo id
+    elif msg.isdigit():
+        pid = msg
 
-        return (
-            "🤔 No entendí.\n"
-            "Escribe *si*, *sí*, *pedido ID*, el *ID*, o *no* para avanzar."
-        )
+    if pid:
+        confirm = agregar_carrito(sender_id, pid)
+        user_state[sender_id]["indice_producto"] += 1
+        return confirm + "\n\n" + mostrar_producto(sender_id)
+
+    return (
+        "🤔 No entendí.\n"
+        "Escribe *si*, *sí*, *pedido ID*, el *ID*, o *no* para avanzar."
+    )
+
 
     # ---------------- ENTREGA ----------------
     if estado == "elige_entrega":
