@@ -407,12 +407,12 @@ def manejar_mensaje(sender_id, msg):
         return mostrar_producto(sender_id)
 
     # ---------------- MOSTRAR PRODUCTO ----------------
-if estado == "mostrando_producto":
+    if estado == "mostrando_producto":
 
-    # Siguiente producto
-    if msg in ["no", "siguiente", "next", "n", "skip"]:
-        user_state[sender_id]["indice_producto"] += 1
-            return mostrar_producto(sender_id)
+        # Siguiente producto
+        if msg in ["no", "siguiente", "next", "n", "skip"]:
+            user_state[sender_id]["indice_producto"] += 1
+    return mostrar_producto(sender_id)
 
     tokens = msg.split()
     pid = None
