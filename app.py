@@ -1,8 +1,3 @@
-# ------------------------------------------------------------
-# ARCHIVO: app.py
-# PROYECTO: Chatbot de Messenger – Frere’s Collection
-# ------------------------------------------------------------
-
 from flask import Flask, request
 import requests
 import logging
@@ -16,7 +11,6 @@ from conexion_firebase import obtener_productos
 import firebase_admin
 from firebase_admin import firestore
 
-# Cliente Firestore
 db = firestore.client()
 
 # ------------------------------------------------------------
@@ -33,9 +27,7 @@ if not PAGE_ACCESS_TOKEN:
 else:
     print("✅ PAGE_ACCESS_TOKEN cargado correctamente.")
 
-# Estados de usuario en memoria
 user_state = {}
-
 
 # ------------------------------------------------------------
 # NORMALIZACIÓN DE TEXTO
@@ -50,22 +42,19 @@ def normalizar(t):
     t = " ".join(t.split())
     return t
 
-
 # ------------------------------------------------------------
 # ENVÍO DE MENSAJES
 # ------------------------------------------------------------
 def enviar_mensaje(id_usuario, texto):
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
+    requests.post(url, json={
         "recipient": {"id": id_usuario},
         "message": {"text": texto}
-    }
-    requests.post(url, json=payload)
-
+    })
 
 def enviar_imagen(id_usuario, url_img):
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
+    requests.post(url, json={
         "recipient": {"id": id_usuario},
         "message": {
             "attachment": {
@@ -73,17 +62,12 @@ def enviar_imagen(id_usuario, url_img):
                 "payload": {"url": url_img, "is_reusable": True}
             }
         }
-    }
-    requests.post(url, json=payload)
-
+    })
 
 # ------------------------------------------------------------
-# AUXILIARES (CATEGORÍAS, PRODUCTOS, CARRITO)
+# AUXILIARES
 # ------------------------------------------------------------
 def construir_categorias(sender_id):
-    """
-    Obtiene las categorías a partir de los productos y actualiza el estado del usuario.
-    """
     productos = obtener_productos()
     categorias = {}
 
@@ -93,26 +77,17 @@ def construir_categorias(sender_id):
 
     lista = list(categorias.keys())
 
-    user_state.setdefault(sender_id, {})
     user_state[sender_id]["estado"] = "elige_categoria"
     user_state[sender_id]["categorias_pendientes"] = lista
     user_state[sender_id].setdefault("carrito", [])
 
-    if not lista:
-        return "😕 No hay categorías con productos disponibles."
-
     msg = "🛍 *Categorías disponibles:*\n\n"
     for i, c in enumerate(lista, 1):
         msg += f"{i}. {c}\n"
-
-    msg += "\n👉 Escribe el número o el nombre de la categoría que quieres ver."
+    msg += "\n👉 Escribe el número o nombre de la categoría."
     return msg
 
-
 def preparar_categoria(sender_id, categoria):
-    """
-    Llena en el estado la lista de productos de la categoría seleccionada.
-    """
     productos = obtener_productos()
     lista = []
 
@@ -126,11 +101,7 @@ def preparar_categoria(sender_id, categoria):
 
     return len(lista) > 0
 
-
 def mostrar_producto(sender_id):
-    """
-    Muestra el producto actual de la categoría; si no hay más, pasa a ategoria.
-    """
     estado = user_state.get(sender_id, {})
     productos = estado.get("productos_categoria", [])
     idx = estado.get("indice_producto", 0)
@@ -154,47 +125,38 @@ def mostrar_producto(sender_id):
         f"💰 ${precio} MXN\n"
         f"🆔 ID: {pid}\n\n"
         "Para agregarlo al pedido puedes escribir:\n"
-        f"• *si {pid}*\n"
-        f"• *sí {pid}*\n"
-        f"• *pedido {pid}*\n"
-        f"• o solo el ID: *{pid}*\n\n"
+        f"• si {pid}\n"
+        f"• sí {pid}\n"
+        f"• pedido {pid}\n"
+        f"• o solo el ID: {pid}\n\n"
         "Para pasar al siguiente: *no* o *siguiente*\n"
         "Para terminar: *finalizar pedido*"
     )
-    return txt
 
+    return txt
 
 def fin_categoria(sender_id):
     estado = user_state[sender_id]
 
-    # -----------------------------------------
-    # FIX: Permitir finalizar pedido aun si ya
-    # no hay productos y el bot cambia de estado.
-    # -----------------------------------------
+    # FIX — Detectar si el último mensaje fue “finalizar pedido”
     ultimo = estado.get("ultimo_mensaje", "")
 
-    if (
-        "finalizar" in ultimo
-        or "finalizar pedido" in ultimo
-        or "cerrar pedido" in ultimo
-        or "terminar" in ultimo
-        or "fin" in ultimo
-        or "ya" in ultimo
-    ):
-        return finalizar_pedido(sender_id)
+    if any(x in ultimo for x in [
+        "finalizar", "finalizar pedido", "cerrar pedido", 
+        "terminar", "fin", "ya"
+    ]):
+        carrito = estado.get("carrito", [])
+        if carrito:
+            return finalizar_pedido(sender_id)
+        return "Tu carrito está vacío. Agrega al menos un producto."
 
-    # -----------------------------------------
-    # Lógica normal cuando no está finalizando
-    # -----------------------------------------
     cat_actual = estado.get("categoria_actual")
     pendientes = estado.get("categorias_pendientes", [])
     carrito = estado.get("carrito", [])
 
-    # Eliminar categoría actual
     if cat_actual in pendientes:
         pendientes.remove(cat_actual)
 
-    # Quedan más categorías
     if pendientes:
         estado["estado"] = "elige_categoria"
         msg = f"✔ Ya no hay más productos en *{cat_actual}*.\n\n"
@@ -204,58 +166,41 @@ def fin_categoria(sender_id):
         msg += "\n👉 Escribe la siguiente categoría o *finalizar pedido*."
         return msg
 
-    # No quedan categorías, pero sí carrito
     if carrito:
         return finalizar_pedido(sender_id)
 
-    # No hay carrito ni más categorías
     estado["estado"] = "logueado"
-    return (
-        "No hay más categorías y no agregaste ningún producto.\n"
-        "Escribe *catalogo* para comenzar de nuevo."
-    )
-
-
+    return "No agregaste ningún producto.\nEscribe *catalogo* para comenzar de nuevo."
 
 def agregar_carrito(sender_id, pid):
-    """
-    Agrega un producto al carrito si el ID existe.
-    """
     productos = obtener_productos()
     if pid not in productos:
-        return "❌ Ese ID de producto no existe."
+        return "❌ Ese ID no existe."
 
     datos = productos[pid]
-    nombre = datos.get("nombre", "Sin nombre")
-    precio = datos.get("precio", 0)
-    categoria = datos.get("categoria", "Sin categoria")
 
     user_state[sender_id].setdefault("carrito", [])
     user_state[sender_id]["carrito"].append({
         "id": pid,
-        "nombre": nombre,
-        "precio": precio,
-        "categoria": categoria
+        "nombre": datos.get("nombre"),
+        "precio": datos.get("precio"),
+        "categoria": datos.get("categoria")
     })
 
-    return f"🛒 *{nombre}* agregado a tu pedido."
-
+    return f"🛒 *{datos.get('nombre')}* agregado al pedido."
 
 def finalizar_pedido(sender_id):
-    """
-    Cierra el pedido: lo guarda en Firestore, genera ID y pide método de entrega.
-    """
     estado = user_state[sender_id]
     carrito = estado.get("carrito", [])
 
     if not carrito:
-        return "🛍 No tienes productos en tu pedido. Escribe *catalogo* para ver productos."
+        return "🛍 Tu carrito está vacío."
 
     total = 0
     for item in carrito:
         try:
             total += float(item.get("precio", 0))
-        except Exception:
+        except:
             pass
 
     pedido = {
@@ -267,27 +212,23 @@ def finalizar_pedido(sender_id):
         "total": total
     }
 
-    # Forma segura: crear doc manualmente y hacer set
-    doc_ref = db.collection("pedidos").document()
-    doc_ref.set(pedido)
-    pedido_id = doc_ref.id
+    doc_ref = db.collection("pedidos").add(pedido)
 
-    # Guardar en estado para el paso de entrega
+    pedido_id = doc_ref[0].id if isinstance(doc_ref, tuple) else doc_ref.id
+
     user_state[sender_id]["estado"] = "elige_entrega"
     user_state[sender_id]["ultimo_pedido_id"] = pedido_id
 
-    msg = (
+    return (
         f"🧾 *Pedido registrado*: {pedido_id}\n\n"
         "📦 ¿Cómo deseas recibirlo?\n"
-        "• *Domicilio*\n"
-        "• *Recoger en tienda*\n\n"
+        "• Domicilio\n"
+        "• Recoger en tienda\n\n"
         "Escribe una opción."
     )
-    return msg
-
 
 # ------------------------------------------------------------
-# CONSULTA DE PEDIDO POR ID
+# CONSULTAR PEDIDO POR ID
 # ------------------------------------------------------------
 def consultar_pedido_por_id(pid):
     doc = db.collection("pedidos").document(pid).get()
@@ -295,9 +236,8 @@ def consultar_pedido_por_id(pid):
         return None
     return doc.to_dict()
 
-
 # ------------------------------------------------------------
-# WEBHOOK (VERIFICACIÓN)
+# WEBHOOK
 # ------------------------------------------------------------
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
@@ -305,10 +245,6 @@ def verify_webhook():
         return request.args.get("hub.challenge")
     return "Token inválido", 403
 
-
-# ------------------------------------------------------------
-# WEBHOOK (MENSAJES)
-# ------------------------------------------------------------
 @app.route("/webhook", methods=["POST"])
 def receive_message():
     data = request.get_json()
@@ -319,34 +255,33 @@ def receive_message():
                 sender_id = event["sender"]["id"]
                 texto = event["message"].get("text", "")
                 msg_norm = normalizar(texto)
+
                 user_state.setdefault(sender_id, {})
                 user_state[sender_id]["ultimo_mensaje"] = msg_norm
+
                 resp = manejar_mensaje(sender_id, msg_norm)
                 if resp:
                     enviar_mensaje(sender_id, resp)
 
     return "OK", 200
 
-
 # ------------------------------------------------------------
-# LÓGICA PRINCIPAL DEL BOT
+# LÓGICA DEL BOT COMPLETA
 # ------------------------------------------------------------
 def manejar_mensaje(sender_id, msg):
     estado = user_state.get(sender_id, {}).get("estado", "inicio")
+
     # -----------------------------------------
     # DETECCIÓN UNIVERSAL DE FINALIZAR PEDIDO
     # -----------------------------------------
-    if any(x in msg for x in ["finalizar", "finalizar pedido", "cerrar pedido", "terminar", "fin", "ya"]):
-        estado_u = user_state.get(sender_id, {})
-        carrito = estado_u.get("carrito", [])
-    
-        # Si ya tiene productos -> finalizar
+    if any(x in msg for x in [
+        "finalizar", "finalizar pedido", "cerrar pedido",
+        "terminar", "fin", "ya"
+    ]):
+        carrito = user_state.get(sender_id, {}).get("carrito", [])
         if carrito:
             return finalizar_pedido(sender_id)
-    
-        # No tiene productos -> mensaje de advertencia
-        return "🛍 Tu carrito está vacío. Agrega al menos un producto antes de finalizar."
-
+        return "🛍 Tu carrito está vacío. Agrega al menos un producto."
 
     # ---------------- SALUDO ----------------
     if any(x in msg for x in ["hola", "buenas", "hello"]):
@@ -360,14 +295,7 @@ def manejar_mensaje(sender_id, msg):
             "🕒 Horario\n"
             "📞 Contacto"
         )
-    if msg.startswith("ver pedido") or msg.startswith("consultar pedido") or msg.startswith("estado pedido"):
-            partes = msg.split()
-            if len(partes) < 3:
-                return "Para consultar escribe: *ver pedido ID*"
-            pid = partes[2]
-            ped = consultar_pedido_por_id(pid)
-            if not ped:
-                return "❌ No encontré ese pedido."
+
     # ---------------- CONTACTO ----------------
     if "contacto" in msg or "whatsapp" in msg:
         return "📱 WhatsApp: *+52 55 1234 5678*"
@@ -375,6 +303,28 @@ def manejar_mensaje(sender_id, msg):
     # ---------------- HORARIO ----------------
     if "horario" in msg:
         return "🕒 Lunes a sábado: 10 AM – 7 PM."
+
+    # ---------------- CONSULTAR PEDIDO ----------------
+    if msg.startswith("consultar") or msg.startswith("ver pedido") or msg.startswith("estado pedido"):
+        partes = msg.split()
+        if len(partes) < 2:
+            return "❗ Escribe: consultar *ID_DEL_PEDIDO*\nEjemplo: consultar z0YjyIFVbpYGWNXL655h"
+
+        pid = partes[-1].strip()
+        ped = consultar_pedido_por_id(pid)
+
+        if not ped:
+            return "❌ No encontré ese pedido."
+
+        resp = f"🧾 *Pedido {pid}*\n"
+        resp += f"📌 Estado: {ped.get('estado')}\n"
+        resp += "📦 Productos:\n"
+
+        for p in ped.get("productos", []):
+            resp += f"• {p['nombre']} – ${p['precio']} (ID: {p['id']})\n"
+
+        resp += f"\n💵 Total: ${ped.get('total')}"
+        return resp
 
     # ---------------- REGISTRO ----------------
     if msg in ["registrar", "crear cuenta", "soy nuevo", "soy nueva"]:
@@ -389,6 +339,7 @@ def manejar_mensaje(sender_id, msg):
     if estado == "registrando_telefono":
         if not msg.isdigit() or len(msg) != 10:
             return "❌ Escribe un número válido de 10 dígitos."
+
         user_state[sender_id]["telefono"] = msg
         user_state[sender_id]["estado"] = "registrando_direccion"
         return "📍 Escribe tu dirección completa."
@@ -405,7 +356,6 @@ def manejar_mensaje(sender_id, msg):
 
         user_state[sender_id]["estado"] = "logueado"
         user_state[sender_id]["direccion"] = msg
-        user_state[sender_id]["nombre"] = nombre
 
         return (
             f"✨ Registro completado, {nombre}.\n\n" +
@@ -420,7 +370,8 @@ def manejar_mensaje(sender_id, msg):
     if estado == "login":
         doc = db.collection("usuarios").document(msg).get()
         if not doc.exists:
-            return "❌ Ese número no está registrado. Escribe *registrar* para crear cuenta."
+            return "❌ Ese número no está registrado."
+
         data = doc.to_dict()
 
         user_state[sender_id] = {
@@ -435,29 +386,8 @@ def manejar_mensaje(sender_id, msg):
             construir_categorias(sender_id)
         )
 
-    # ---------------- CONSULTAR PEDIDO POR ID ----------------
-    if msg.startswith("ver pedido") or msg.startswith("consultar") or msg.startswith("estado pedido"):
-        tokens = msg.split()
-        if len(tokens) < 3:
-            return "Escribe: *ver pedido IDPEDIDO*"
-        pid = tokens[2]
-
-        ped = consultar_pedido_por_id(pid)
-        if not ped:
-            return "❌ No encontré ese pedido."
-
-        resp = f"🧾 *Pedido {pid}*\n"
-        resp += f"📌 Estado: {ped.get('estado')}\n"
-        resp += "📦 Productos:\n"
-        for p in ped.get("productos", []):
-            resp += f"• {p['nombre']} – ${p['precio']} (ID: {p['id']})\n"
-        resp += f"\n💵 Total: ${ped.get('total')}"
-        return resp
-
     # ---------------- CATÁLOGO ----------------
     if "catalogo" in msg:
-        if sender_id not in user_state:
-            user_state[sender_id] = {"estado": "inicio"}
         return construir_categorias(sender_id)
 
     # ---------------- ELEGIR CATEGORÍA ----------------
@@ -488,35 +418,15 @@ def manejar_mensaje(sender_id, msg):
     # ---------------- MOSTRAR PRODUCTO / CARRITO ----------------
     if estado == "mostrando_producto":
 
-        # FINALIZAR PEDIDO (todas las variantes comunes)
-        if (
-            msg in ["finalizar", "finalizar pedido", "cerrar pedido", "terminar", "ya", "fin"]
-            or "finalizar" in msg
-            or "cerrar pedido" in msg
-            or "cerrar" in msg
-            or "terminar" in msg
-            or "finaliza" in msg
-            or "finaliza pedido" in msg
-            or "completar" in msg
-            or "completar pedido" in msg
-            or "listo" in msg
-            or "ya esta" in msg
-            or "ya es todo" in msg
-        ):
-            return finalizar_pedido(sender_id)
-
-        # SIGUIENTE PRODUCTO
         if msg in ["no", "siguiente", "next", "n", "skip"]:
             user_state[sender_id]["indice_producto"] += 1
             return mostrar_producto(sender_id)
 
-        # AGREGAR PRODUCTO
         tokens = msg.split()
         pid = None
 
-        # si 123, sí 123
-        if tokens and tokens[0] in ["si", "sí", "si,", "si.", "sí,", "sí."]:
-            if len(tokens) > 1 and tokens[1].isdigit():
+        if tokens[0] in ["si", "sí"]:
+            if len(tokens) > 1 and tokens[1].isdigit() and len(tokens[1]) <= 4:
                 pid = tokens[1]
             else:
                 productos = user_state[sender_id]["productos_categoria"]
@@ -524,12 +434,11 @@ def manejar_mensaje(sender_id, msg):
                 if idx < len(productos):
                     pid = productos[idx]["id"]
 
-        # pedido 123
-        elif tokens and tokens[0] == "pedido" and len(tokens) > 1:
-            pid = tokens[1]
+        elif tokens[0] == "pedido" and len(tokens) > 1:
+            if tokens[1].isdigit() and len(tokens[1]) <= 4:
+                pid = tokens[1]
 
-        # solo id
-        elif msg.isdigit():
+        elif msg.isdigit() and len(msg) <= 4:  # FIX para no confundir IDs de pedidos
             pid = msg
 
         if pid:
@@ -539,12 +448,12 @@ def manejar_mensaje(sender_id, msg):
 
         return (
             "🤔 No entendí.\n"
-            "Escribe *si*, *sí*, *pedido ID*, el *ID*, o *no* para avanzar."
+            "Escribe *si*, *pedido ID*, solo el *ID*, o *no* para avanzar."
         )
 
-    # ---------------- ELECCIÓN MÉTODO DE ENTREGA ----------------
+    # ---------------- ENTREGA ----------------
     if estado == "elige_entrega":
-        pid = user_state[sender_id].get("ultimo_pedido_id")
+        pid = user_state[sender_id]["ultimo_pedido_id"]
 
         if any(x in msg for x in ["domicilio", "casa", "enviar"]):
             db.collection("pedidos").document(pid).update({
@@ -570,10 +479,10 @@ def manejar_mensaje(sender_id, msg):
         "🛍 Catalogo\n"
         "📝 Registrar\n"
         "🔐 Iniciar sesion\n"
+        "📦 Consultar pedido\n"
         "🕒 Horario\n"
         "📞 Contacto"
     )
-
 
 # ------------------------------------------------------------
 # EJECUCIÓN DEL SERVIDOR
