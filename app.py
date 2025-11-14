@@ -3,7 +3,6 @@
 # PROYECTO: Chatbot de Messenger – Frere’s Collection
 # ------------------------------------------------------------
 
-
 from flask import Flask, request
 import requests
 import logging
@@ -17,6 +16,7 @@ from conexion_firebase import obtener_productos
 import firebase_admin
 from firebase_admin import firestore
 
+# Cliente Firestore
 db = firestore.client()
 
 # ------------------------------------------------------------
@@ -33,7 +33,7 @@ if not PAGE_ACCESS_TOKEN:
 else:
     print("✅ PAGE_ACCESS_TOKEN cargado correctamente.")
 
-# Estados de usuario
+# Estados de usuario en memoria
 user_state = {}
 
 
@@ -56,15 +56,16 @@ def normalizar(t):
 # ------------------------------------------------------------
 def enviar_mensaje(id_usuario, texto):
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    requests.post(url, json={
+    payload = {
         "recipient": {"id": id_usuario},
         "message": {"text": texto}
-    })
+    }
+    requests.post(url, json=payload)
 
 
 def enviar_imagen(id_usuario, url_img):
     url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    requests.post(url, json={
+    payload = {
         "recipient": {"id": id_usuario},
         "message": {
             "attachment": {
@@ -72,13 +73,17 @@ def enviar_imagen(id_usuario, url_img):
                 "payload": {"url": url_img, "is_reusable": True}
             }
         }
-    })
+    }
+    requests.post(url, json=payload)
 
 
 # ------------------------------------------------------------
 # AUXILIARES (CATEGORÍAS, PRODUCTOS, CARRITO)
 # ------------------------------------------------------------
 def construir_categorias(sender_id):
+    """
+    Obtiene las categorías a partir de los productos y actualiza el estado del usuario.
+    """
     productos = obtener_productos()
     categorias = {}
 
@@ -88,20 +93,26 @@ def construir_categorias(sender_id):
 
     lista = list(categorias.keys())
 
+    user_state.setdefault(sender_id, {})
     user_state[sender_id]["estado"] = "elige_categoria"
     user_state[sender_id]["categorias_pendientes"] = lista
     user_state[sender_id].setdefault("carrito", [])
+
+    if not lista:
+        return "😕 No hay categorías con productos disponibles."
 
     msg = "🛍 *Categorías disponibles:*\n\n"
     for i, c in enumerate(lista, 1):
         msg += f"{i}. {c}\n"
 
-    msg += "\n👉 Escribe el número o nombre de la categoría."
-
+    msg += "\n👉 Escribe el número o el nombre de la categoría que quieres ver."
     return msg
 
 
 def preparar_categoria(sender_id, categoria):
+    """
+    Llena en el estado la lista de productos de la categoría seleccionada.
+    """
     productos = obtener_productos()
     lista = []
 
@@ -117,6 +128,9 @@ def preparar_categoria(sender_id, categoria):
 
 
 def mostrar_producto(sender_id):
+    """
+    Muestra el producto actual de la categoría; si no hay más, pasa a fin_categoria.
+    """
     estado = user_state.get(sender_id, {})
     productos = estado.get("productos_categoria", [])
     idx = estado.get("indice_producto", 0)
@@ -139,27 +153,28 @@ def mostrar_producto(sender_id):
         f"🔹 *{nombre}*\n"
         f"💰 ${precio} MXN\n"
         f"🆔 ID: {pid}\n\n"
-        "Para agregarlo escribe:\n"
+        "Para agregarlo al pedido puedes escribir:\n"
         f"• *si {pid}*\n"
         f"• *sí {pid}*\n"
         f"• *pedido {pid}*\n"
         f"• o solo el ID: *{pid}*\n\n"
-        "Para avanzar escribe *no* o *siguiente*\n"
-        "Para terminar escribe *finalizar pedido*"
+        "Para pasar al siguiente: *no* o *siguiente*\n"
+        "Para terminar: *finalizar pedido*"
     )
-
     return txt
 
 
 def fin_categoria(sender_id):
+    """
+    Maneja el caso cuando ya no hay más productos en la categoría actual.
+    """
     estado = user_state[sender_id]
     cat_actual = estado.get("categoria_actual")
     pendientes = estado.get("categorias_pendientes", [])
+    carrito = estado.get("carrito", [])
 
     if cat_actual in pendientes:
         pendientes.remove(cat_actual)
-
-    carrito = estado.get("carrito", [])
 
     if pendientes:
         estado["estado"] = "elige_categoria"
@@ -174,18 +189,24 @@ def fin_categoria(sender_id):
             return finalizar_pedido(sender_id)
         else:
             estado["estado"] = "logueado"
-            return "No hay más categorías y no agregaste productos. Escribe *catalogo* para ver de nuevo."
+            return (
+                "No hay más categorías con productos y no agregaste nada al carrito.\n"
+                "Escribe *catalogo* para empezar de nuevo."
+            )
 
 
 def agregar_carrito(sender_id, pid):
+    """
+    Agrega un producto al carrito si el ID existe.
+    """
     productos = obtener_productos()
     if pid not in productos:
-        return "❌ Ese ID no existe."
+        return "❌ Ese ID de producto no existe."
 
     datos = productos[pid]
-    nombre = datos.get("nombre")
-    precio = datos.get("precio")
-    categoria = datos.get("categoria")
+    nombre = datos.get("nombre", "Sin nombre")
+    precio = datos.get("precio", 0)
+    categoria = datos.get("categoria", "Sin categoria")
 
     user_state[sender_id].setdefault("carrito", [])
     user_state[sender_id]["carrito"].append({
@@ -199,17 +220,20 @@ def agregar_carrito(sender_id, pid):
 
 
 def finalizar_pedido(sender_id):
+    """
+    Cierra el pedido: lo guarda en Firestore, genera ID y pide método de entrega.
+    """
     estado = user_state[sender_id]
     carrito = estado.get("carrito", [])
 
     if not carrito:
-        return "🛍 No tienes productos. Escribe *catalogo*."
+        return "🛍 No tienes productos en tu pedido. Escribe *catalogo* para ver productos."
 
     total = 0
     for item in carrito:
         try:
             total += float(item.get("precio", 0))
-        except:
+        except Exception:
             pass
 
     pedido = {
@@ -221,16 +245,12 @@ def finalizar_pedido(sender_id):
         "total": total
     }
 
-    # 💥 FIX AQUÍ 💥
-    doc_ref = db.collection("pedidos").add(pedido)
+    # Forma segura: crear doc manualmente y hacer set
+    doc_ref = db.collection("pedidos").document()
+    doc_ref.set(pedido)
+    pedido_id = doc_ref.id
 
-    # Manejo universal del return de .add()
-    if isinstance(doc_ref, tuple):
-        pedido_id = doc_ref[0].id
-    else:
-        pedido_id = doc_ref.id
-
-    # Guardar en estado para paso final de entrega
+    # Guardar en estado para el paso de entrega
     user_state[sender_id]["estado"] = "elige_entrega"
     user_state[sender_id]["ultimo_pedido_id"] = pedido_id
 
@@ -242,7 +262,6 @@ def finalizar_pedido(sender_id):
         "Escribe una opción."
     )
     return msg
-
 
 
 # ------------------------------------------------------------
@@ -277,9 +296,9 @@ def receive_message():
             if "message" in event and not event["message"].get("is_echo"):
                 sender_id = event["sender"]["id"]
                 texto = event["message"].get("text", "")
-                txt = normalizar(texto)
+                msg_norm = normalizar(texto)
 
-                resp = manejar_mensaje(sender_id, txt)
+                resp = manejar_mensaje(sender_id, msg_norm)
                 if resp:
                     enviar_mensaje(sender_id, resp)
 
@@ -287,7 +306,7 @@ def receive_message():
 
 
 # ------------------------------------------------------------
-# LÓGICA DEL BOT COMPLETA
+# LÓGICA PRINCIPAL DEL BOT
 # ------------------------------------------------------------
 def manejar_mensaje(sender_id, msg):
     estado = user_state.get(sender_id, {}).get("estado", "inicio")
@@ -317,13 +336,11 @@ def manejar_mensaje(sender_id, msg):
         user_state[sender_id] = {"estado": "registrando_nombre"}
         return "📝 ¿Cuál es tu nombre completo?"
 
-    # REGISTRAR NOMBRE
     if estado == "registrando_nombre":
         user_state[sender_id]["nombre"] = msg
         user_state[sender_id]["estado"] = "registrando_telefono"
         return "📱 Escribe tu número telefónico (10 dígitos)."
 
-    # REGISTRAR TELÉFONO
     if estado == "registrando_telefono":
         if not msg.isdigit() or len(msg) != 10:
             return "❌ Escribe un número válido de 10 dígitos."
@@ -331,7 +348,6 @@ def manejar_mensaje(sender_id, msg):
         user_state[sender_id]["estado"] = "registrando_direccion"
         return "📍 Escribe tu dirección completa."
 
-    # REGISTRAR DIRECCIÓN
     if estado == "registrando_direccion":
         nombre = user_state[sender_id]["nombre"]
         telefono = user_state[sender_id]["telefono"]
@@ -344,6 +360,7 @@ def manejar_mensaje(sender_id, msg):
 
         user_state[sender_id]["estado"] = "logueado"
         user_state[sender_id]["direccion"] = msg
+        user_state[sender_id]["nombre"] = nombre
 
         return (
             f"✨ Registro completado, {nombre}.\n\n" +
@@ -358,7 +375,7 @@ def manejar_mensaje(sender_id, msg):
     if estado == "login":
         doc = db.collection("usuarios").document(msg).get()
         if not doc.exists:
-            return "❌ Ese número no está registrado."
+            return "❌ Ese número no está registrado. Escribe *registrar* para crear cuenta."
         data = doc.to_dict()
 
         user_state[sender_id] = {
@@ -387,10 +404,8 @@ def manejar_mensaje(sender_id, msg):
         resp = f"🧾 *Pedido {pid}*\n"
         resp += f"📌 Estado: {ped.get('estado')}\n"
         resp += "📦 Productos:\n"
-
         for p in ped.get("productos", []):
             resp += f"• {p['nombre']} – ${p['precio']} (ID: {p['id']})\n"
-
         resp += f"\n💵 Total: ${ped.get('total')}"
         return resp
 
@@ -425,70 +440,66 @@ def manejar_mensaje(sender_id, msg):
         user_state[sender_id]["estado"] = "mostrando_producto"
         return mostrar_producto(sender_id)
 
-   # ---------------- MOSTRAR PRODUCTO / CARRITO ----------------
-if estado == "mostrando_producto":
+    # ---------------- MOSTRAR PRODUCTO / CARRITO ----------------
+    if estado == "mostrando_producto":
 
-    # FINALIZAR PEDIDO (todas las variantes posibles)
-    if (
-        msg in [
-            "finalizar", "finalizar pedido", "cerrar pedido",
-            "terminar", "ya", "fin"
-        ]
-        or "finalizar" in msg
-        or "cerrar pedido" in msg
-        or "cerrar" in msg
-        or "terminar" in msg
-        or "finaliza" in msg
-        or "finaliza pedido" in msg
-        or "completar" in msg
-        or "completar pedido" in msg
-        or "listo" in msg
-        or "ya esta" in msg
-        or "ya es todo" in msg
-    ):
-        return finalizar_pedido(sender_id)
+        # FINALIZAR PEDIDO (todas las variantes comunes)
+        if (
+            msg in ["finalizar", "finalizar pedido", "cerrar pedido", "terminar", "ya", "fin"]
+            or "finalizar" in msg
+            or "cerrar pedido" in msg
+            or "cerrar" in msg
+            or "terminar" in msg
+            or "finaliza" in msg
+            or "finaliza pedido" in msg
+            or "completar" in msg
+            or "completar pedido" in msg
+            or "listo" in msg
+            or "ya esta" in msg
+            or "ya es todo" in msg
+        ):
+            return finalizar_pedido(sender_id)
 
-    # SIGUIENTE PRODUCTO
-    if msg in ["no", "siguiente", "next", "n", "skip"]:
-        user_state[sender_id]["indice_producto"] += 1
-        return mostrar_producto(sender_id)
+        # SIGUIENTE PRODUCTO
+        if msg in ["no", "siguiente", "next", "n", "skip"]:
+            user_state[sender_id]["indice_producto"] += 1
+            return mostrar_producto(sender_id)
 
-    # AGREGAR PRODUCTO
-    tokens = msg.split()
-    pid = None
+        # AGREGAR PRODUCTO
+        tokens = msg.split()
+        pid = None
 
-    # si 123, sí 123
-    if tokens[0] in ["si", "sí", "si,", "si.", "sí,", "sí."]:
-        if len(tokens) > 1 and tokens[1].isdigit():
+        # si 123, sí 123
+        if tokens and tokens[0] in ["si", "sí", "si,", "si.", "sí,", "sí."]:
+            if len(tokens) > 1 and tokens[1].isdigit():
+                pid = tokens[1]
+            else:
+                productos = user_state[sender_id]["productos_categoria"]
+                idx = user_state[sender_id]["indice_producto"]
+                if idx < len(productos):
+                    pid = productos[idx]["id"]
+
+        # pedido 123
+        elif tokens and tokens[0] == "pedido" and len(tokens) > 1:
             pid = tokens[1]
-        else:
-            productos = user_state[sender_id]["productos_categoria"]
-            idx = user_state[sender_id]["indice_producto"]
-            if idx < len(productos):
-                pid = productos[idx]["id"]
 
-    # pedido 123
-    elif tokens[0] == "pedido" and len(tokens) > 1:
-        pid = tokens[1]
+        # solo id
+        elif msg.isdigit():
+            pid = msg
 
-    # solo id
-    elif msg.isdigit():
-        pid = msg
+        if pid:
+            confirm = agregar_carrito(sender_id, pid)
+            user_state[sender_id]["indice_producto"] += 1
+            return confirm + "\n\n" + mostrar_producto(sender_id)
 
-    if pid:
-        confirm = agregar_carrito(sender_id, pid)
-        user_state[sender_id]["indice_producto"] += 1
-        return confirm + "\n\n" + mostrar_producto(sender_id)
+        return (
+            "🤔 No entendí.\n"
+            "Escribe *si*, *sí*, *pedido ID*, el *ID*, o *no* para avanzar."
+        )
 
-    return (
-        "🤔 No entendí.\n"
-        "Escribe *si*, *sí*, *pedido ID*, el *ID*, o *no* para avanzar."
-    )
-
-
-    # ---------------- ENTREGA ----------------
+    # ---------------- ELECCIÓN MÉTODO DE ENTREGA ----------------
     if estado == "elige_entrega":
-        pid = user_state[sender_id]["ultimo_pedido_id"]
+        pid = user_state[sender_id].get("ultimo_pedido_id")
 
         if any(x in msg for x in ["domicilio", "casa", "enviar"]):
             db.collection("pedidos").document(pid).update({
@@ -518,8 +529,9 @@ if estado == "mostrando_producto":
         "📞 Contacto"
     )
 
+
 # ------------------------------------------------------------
-# 5️⃣ EJECUCIÓN DEL SERVIDOR
+# EJECUCIÓN DEL SERVIDOR
 # ------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
