@@ -2,41 +2,52 @@
 # ARCHIVO: app.py
 # PROYECTO: Chatbot de Messenger – Frere’s Collection
 # DESCRIPCIÓN:
-#   Chatbot 100% Python (sin Dialogflow), con estados,
-#   catálogo, categorías, fallback avanzado y conexión
-#   directa con Firebase.
+#   Chatbot 100% Python con:
+#   - Registro de usuarios
+#   - Inicio de sesión
+#   - Pedidos por ID
+#   - Catálogo conectado a Firestore
+#   - Sistema de estados
+#   - Fallback profesional
 #
-# AUTOR: Fernando Ortiz (versión mejorada)
+# AUTOR: Fernando Ortiz (versión extendida)
 # ------------------------------------------------------------
 
-# --- Importación de librerías necesarias ---
 from flask import Flask, request
 import requests
 import logging
-from conexion_firebase import obtener_productos   # Firebase
+import os
 import unicodedata
 import string
+from datetime import datetime
+
+# Firebase
+from conexion_firebase import obtener_productos
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 # ------------------------------------------------------------
-# CONFIGURACIÓN INICIAL
+# CONFIG FIREBASE
 # ------------------------------------------------------------
+# Render ya inicia Firebase desde conexion_firebase.py
+db = firestore.client()
 
+# ------------------------------------------------------------
+# CONFIG SERVIDOR
+# ------------------------------------------------------------
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 VERIFY_TOKEN = "freres_verificacion"
-
-import os
-
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 
 if not PAGE_ACCESS_TOKEN:
-    print("❌ ERROR: PAGE_ACCESS_TOKEN no está definido en Render.")
+    print("❌ ERROR: No se encontró PAGE_ACCESS_TOKEN en Render.")
 else:
-    print("✅ PAGE_ACCESS_TOKEN cargado correctamente desde Render.")
-# <-- reemplazar
+    print("✅ Token de página cargado correctamente.")
 
-# Diccionario de estados por usuario
+
+# Estados de usuarios
 user_state = {}
 
 # ------------------------------------------------------------
@@ -51,6 +62,29 @@ def normalizar(texto):
     texto = texto.translate(str.maketrans("", "", string.punctuation))
     return texto.strip()
 
+# ------------------------------------------------------------
+# ENVIAR MENSAJE TEXTO
+# ------------------------------------------------------------
+def enviar_mensaje(id_usuario, texto):
+    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+    payload = {"recipient": {"id": id_usuario}, "message": {"text": texto}}
+    requests.post(url, json=payload)
+
+# ------------------------------------------------------------
+# ENVIAR IMAGEN
+# ------------------------------------------------------------
+def enviar_imagen(id_usuario, imagen_url):
+    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+    payload = {
+        "recipient": {"id": id_usuario},
+        "message": {
+            "attachment": {
+                "type": "image",
+                "payload": {"url": imagen_url, "is_reusable": True}
+            }
+        }
+    }
+    requests.post(url, json=payload)
 
 # ------------------------------------------------------------
 # 1️⃣ VERIFICACIÓN WEBHOOK
@@ -62,15 +96,12 @@ def verify_webhook():
     challenge = request.args.get("hub.challenge")
 
     if mode == "subscribe" and token == VERIFY_TOKEN:
-        print("✅ Webhook verificado correctamente.")
         return challenge
-    else:
-        print("❌ Token de verificación inválido.")
-        return "Token inválido", 403
+    return "Token inválido", 403
 
 
 # ------------------------------------------------------------
-# 2️⃣ RECEPCIÓN DE MENSAJES
+# 2️⃣ RECIBIR MENSAJES
 # ------------------------------------------------------------
 @app.route("/webhook", methods=["POST"])
 def receive_message():
@@ -81,12 +112,12 @@ def receive_message():
 
     for entry in data["entry"]:
         for event in entry.get("messaging", []):
-            if "message" in event and not event.get("message", {}).get("is_echo"):
+            if "message" in event and not event["message"].get("is_echo"):
                 sender_id = event["sender"]["id"]
-                message_text = event["message"].get("text", "")
-                message_text_norm = normalizar(message_text)
+                message = event["message"].get("text", "")
+                msg_norm = normalizar(message)
 
-                respuesta = manejar_mensaje(sender_id, message_text_norm)
+                respuesta = manejar_mensaje(sender_id, msg_norm)
 
                 if respuesta:
                     enviar_mensaje(sender_id, respuesta)
@@ -95,36 +126,93 @@ def receive_message():
 
 
 # ------------------------------------------------------------
-# 3️⃣ LÓGICA PRINCIPAL DEL CHATBOT
+# 3️⃣ LÓGICA DEL CHATBOT
 # ------------------------------------------------------------
 def manejar_mensaje(sender_id, message):
-    estado_actual = user_state.get(sender_id, "inicio")
+    estado = user_state.get(sender_id, "inicio")
 
-    # ---------------------------
-    # INTENTS GLOBAL DE RESPUESTA
-    # ---------------------------
-
-    # Saludo
-    if any(p in message for p in ["hola", "que tal", "buenas", "hello"]):
+    # --------------------------
+    # SALUDO
+    # --------------------------
+    if any(p in message for p in ["hola", "buenas", "hello", "que tal"]):
         return (
-            "👋 ¡Hola! Bienvenida a *Frere’s Collection 💅👜*\n\n"
+            "👋 ¡Hola! Bienvenida a *Frere’s Collection* 💅👜\n"
             "Puedo ayudarte con:\n"
             "🛍️ *Catálogo*\n"
             "🕒 *Horario*\n"
-            "📞 *Contacto*"
+            "📞 *Contacto*\n"
+            "📝 *Registrar* cuenta\n"
+            "🔐 *Iniciar sesión*"
         )
 
-    # Horario
-    if "horario" in message:
-        return "🕒 Nuestro horario es de *lunes a sábado, de 10 a.m. a 7 p.m.*"
-
-    # Contacto
+    # --------------------------
+    # CONTACTO
+    # --------------------------
     if "contacto" in message or "whatsapp" in message:
-        return "📱 Puedes contactarnos por WhatsApp al *+52 55 1234 5678*."
+        return "📱 WhatsApp: *+52 55 1234 5678*"
 
-    # ---------------------------
-    # INTENT: CATÁLOGO PRINCIPAL
-    # ---------------------------
+    # --------------------------
+    # HORARIO
+    # --------------------------
+    if "horario" in message:
+        return "🕒 Lunes a sábado: *10 a.m. - 7 p.m.*"
+
+    # --------------------------
+    # REGISTRO
+    # --------------------------
+    if "registrar" in message or "crear cuenta" in message or "soy nuevo" in message:
+        user_state[sender_id] = {"estado": "registrando_nombre"}
+        return "📝 Perfecto, iniciamos registro.\n¿Cuál es tu nombre completo?"
+
+    if estado == "registrando_nombre":
+        user_state[sender_id] = {
+            "estado": "registrando_telefono",
+            "nombre": message
+        }
+        return "📱 Excelente. Ahora escribe tu número telefónico (10 dígitos)."
+
+    if estado == "registrando_telefono":
+        if not message.isdigit() or len(message) != 10:
+            return "❌ El teléfono debe tener 10 dígitos."
+        user_state[sender_id]["telefono"] = message
+        user_state[sender_id]["estado"] = "registrando_direccion"
+        return "📍 ¿Cuál es tu dirección completa?"
+
+    if estado == "registrando_direccion":
+        nombre = user_state[sender_id]["nombre"]
+        telefono = user_state[sender_id]["telefono"]
+        direccion = message
+
+        db.collection("usuarios").document(telefono).set({
+            "nombre": nombre,
+            "telefono": telefono,
+            "direccion": direccion
+        })
+
+        user_state[sender_id] = {"estado": "logueado", "telefono": telefono}
+
+        return f"✨ ¡Registro completado, {nombre}! Ya puedes hacer pedidos."
+
+    # --------------------------
+    # LOGIN
+    # --------------------------
+    if "iniciar sesion" in message or "entrar" in message:
+        user_state[sender_id] = {"estado": "login_telefono"}
+        return "🔐 Escribe tu número telefónico registrado."
+
+    if estado == "login_telefono":
+        doc = db.collection("usuarios").document(message).get()
+        if not doc.exists:
+            return "❌ Número no registrado. Escribe *registrar* para crear cuenta."
+
+        nombre = doc.to_dict().get("nombre")
+        user_state[sender_id] = {"estado": "logueado", "telefono": message}
+
+        return f"✨ Bienvenido de nuevo, {nombre}. Ya puedes pedir productos."
+
+    # --------------------------
+    # CATÁLOGO
+    # --------------------------
     if "catalogo" in message or "catálogo" in message:
         productos = obtener_productos()
         categorias = {}
@@ -133,105 +221,98 @@ def manejar_mensaje(sender_id, message):
             cat = p.get("categoria", "Sin categoría")
             categorias[cat] = categorias.get(cat, 0) + 1
 
-        if categorias:
-            msg = "🛍️ *Categorías disponibles:*\n\n"
-            for i, (cat, cant) in enumerate(categorias.items(), start=1):
-                msg += f"{i}. {cat} ({cant})\n"
-            msg += "\n👉 Escribe el número o el nombre de la categoría."
+        msg = "🛍️ *Categorías disponibles:*\n\n"
+        for i, (cat, cant) in enumerate(categorias.items(), start=1):
+            msg += f"{i}. {cat} ({cant})\n"
 
-            # Guardamos estado
-            user_state[sender_id] = {
-                "estado": "esperando_categoria",
-                "categorias": list(categorias.keys())
-            }
-            return msg
-        else:
-            return "😕 No hay productos en este momento."
+        msg += "\n👉 Escribe el número o el nombre de la categoría."
 
-    # ---------------------------
-    # ESTADO: ESPERANDO CATEGORÍA
-    # ---------------------------
-    if isinstance(estado_actual, dict) and estado_actual.get("estado") == "esperando_categoria":
-        categorias = estado_actual["categorias"]
+        user_state[sender_id] = {
+            "estado": "esperando_categoria",
+            "categorias": list(categorias.keys())
+        }
+
+        return msg
+
+    # --------------------------
+    # MOSTRAR PRODUCTOS POR CATEGORÍA
+    # --------------------------
+    if isinstance(estado, dict) and estado.get("estado") == "esperando_categoria":
+        categorias = estado["categorias"]
         productos = obtener_productos()
 
-        # si escribe número
         if message.isdigit():
             idx = int(message) - 1
             if 0 <= idx < len(categorias):
                 categoria = categorias[idx]
             else:
-                return "❌ Número inválido. Intenta de nuevo."
+                return "❌ Número inválido."
         else:
             categoria = next((c for c in categorias if c.lower() in message), None)
 
-        if categoria:
-            enviar_mensaje(sender_id, f"👜 *Productos en la categoría {categoria}:*")
+        if not categoria:
+            return "❌ Categoría no reconocida."
 
-            encontrados = False
-            piezas_temp = "No disponible"
+        enviar_mensaje(sender_id, f"👜 *Productos en {categoria}:*")
 
-            for prod in productos.values():
-                if prod.get("categoria", "").lower() == categoria.lower():
-                    encontrados = True
+        for id_prod, datos in productos.items():
+            if datos.get("categoria", "").lower() == categoria.lower():
+                nombre = datos.get("nombre", "Sin nombre")
+                precio = datos.get("precio", "N/A")
+                img = datos.get("imagen_url", "")
 
-                    nombre = prod.get("nombre", "Sin nombre")
-                    precio = prod.get("precio", "N/A")
-                    imagen = prod.get("imagen_url", "")
-                    stock_info = prod.get("stock", {})
-                    piezas_temp = stock_info.get("Piezas", "N/D")
+                enviar_mensaje(sender_id, f"🔹 *{nombre}*\n💰 ${precio} MXN\nID: {id_prod}")
+                if img:
+                    enviar_imagen(sender_id, img)
 
-                    enviar_mensaje(sender_id, f"🔹 *{nombre}* — 💰 ${precio} MXN")
+        user_state[sender_id] = "inicio"
+        return "✨ Puedes escribir *pedido 1234* para pedir un producto."
 
-                    if imagen:
-                        enviar_imagen(sender_id, imagen)
+    # --------------------------
+    # PEDIDO POR ID
+    # --------------------------
+    if message.startswith("pedido"):
+        partes = message.split()
+        if len(partes) < 2:
+            return "🛒 Escribe así: *pedido 1023*"
 
-            enviar_mensaje(sender_id, f"📦 Piezas disponibles: {piezas_temp}")
+        id_prod = partes[1]
+        productos = obtener_productos()
 
-            user_state[sender_id] = "inicio"
+        estado = user_state.get(sender_id)
 
-            if not encontrados:
-                return f"😕 No hay productos en la categoría *{categoria}*."
+        if not isinstance(estado, dict) or estado.get("estado") != "logueado":
+            return "🔐 Necesitas iniciar sesión. Escribe *iniciar sesión*."
 
-            return "✨ Escribe *catálogo* para volver al menú."
+        telefono = estado["telefono"]
 
-        else:
-            return "❌ No reconocí esa categoría. Intenta de nuevo."
+        if id_prod not in productos:
+            return "❌ No existe un producto con ese ID."
 
-    # ---------------------------
+        prod = productos[id_prod]
+
+        db.collection("pedidos").add({
+            "telefono": telefono,
+            "id_producto": id_prod,
+            "fecha": datetime.now(),
+            "estado": "pendiente"
+        })
+
+        return f"✔ Pedido creado para *{prod['nombre']}*.\nTe contactaremos pronto."
+
+    # ----------------------------------------------------
     # FALLBACK PROFESIONAL
-    # ---------------------------
-    fallback = (
+    # ----------------------------------------------------
+    return (
         "🤔 No entendí muy bien lo que quisiste decir…\n\n"
         "Puedo ayudarte con:\n"
         "🛍️ Ver *catálogo*\n"
-        "🎨 Buscar por *categoría*\n"
+        "📝 *Registrar* cuenta\n"
+        "🔐 *Iniciar sesión*\n"
         "🕒 Ver *horario*\n"
         "📞 Ver *contacto*\n\n"
         "¿Qué deseas hacer?"
     )
-
-    return fallback
-
-
-# ------------------------------------------------------------
-# 4️⃣ FUNCIONES PARA ENVIAR MENSAJES
-# ------------------------------------------------------------
-def enviar_mensaje(id_usuario, texto):
-    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {"recipient": {"id": id_usuario}, "message": {"text": texto}}
-    requests.post(url, json=payload)
-
-
-def enviar_imagen(id_usuario, imagen_url):
-    url = f"https://graph.facebook.com/v18.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
-        "recipient": {"id": id_usuario},
-        "message": {
-            "attachment": {"type": "image", "payload": {"url": imagen_url, "is_reusable": True}}
-        }
-    }
-    requests.post(url, json=payload)
 
 
 # ------------------------------------------------------------
