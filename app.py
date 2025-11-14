@@ -406,46 +406,51 @@ def manejar_mensaje(sender_id, msg):
         user_state[sender_id]["estado"] = "mostrando_producto"
         return mostrar_producto(sender_id)
 
-    # MOSTRAR PRODUCTO
-    if estado == "mostrando_producto":
+    # ---------------- MOSTRAR PRODUCTO ----------------
+if estado == "mostrando_producto":
 
-        # Siguiente producto
-        if msg in ["no", "siguiente", "next", "n", "skip"]:
-            user_state[sender_id]["indice_producto"] += 1
-            return mostrar_producto(sender_id)
+    # Siguiente producto
+    if msg in ["no", "siguiente", "next", "n", "skip"]:
+        user_state[sender_id]["indice_producto"] += 1
+        return mostrar_producto(sender_id)
 
-        # Analizar si agrega producto
-        tokens = msg.split()
-        pid = None
+    tokens = msg.split()
+    pid = None
 
-        # si 123
-        if tokens[0] in ["si", "sí"] and len(tokens) > 1:
-            if tokens[1].isdigit() and len(tokens[1]) <= 4:
-                pid = tokens[1]
+    # si ID
+    if tokens[0] in ["si", "sí"] and len(tokens) > 1:
+        token_id = tokens[1]
+        productos = obtener_productos()
+        if token_id in productos:
+            pid = token_id
 
-        # pedido 123
-        elif tokens[0] == "pedido" and len(tokens) > 1:
-            if tokens[1].isdigit() and len(tokens[1]) <= 4:
-                pid = tokens[1]
+    # pedido ID
+    elif tokens[0] == "pedido" and len(tokens) > 1:
+        token_id = tokens[1]
+        productos = obtener_productos()
+        if token_id in productos:
+            pid = token_id
 
-        # solo número (ID de producto)
-        elif msg.isdigit() and len(msg) <= 4:
+    # mensaje completo es ID
+    else:
+        productos = obtener_productos()
+        if msg in productos:
             pid = msg
 
-        if pid:
-            confirm = agregar_carrito(sender_id, pid)
-            user_state[sender_id]["indice_producto"] += 1
-            return confirm + "\n\n" + mostrar_producto(sender_id)
+    if pid:
+        confirm = agregar_carrito(sender_id, pid)
+        user_state[sender_id]["indice_producto"] += 1
+        return confirm + "\n\n" + mostrar_producto(sender_id)
 
-        return (
-            "🤔 No entendí.\n"
-            "Puedes escribir:\n"
-            "• si ID\n"
-            "• pedido ID\n"
-            "• ID (solo el número)\n"
-            "• no (para siguiente)\n"
-            "• finalizar pedido"
-        )
+    return (
+        "🤔 No entendí.\n"
+        "Puedes escribir:\n"
+        "• si ID\n"
+        "• pedido ID\n"
+        "• ID solo\n"
+        "• no (para avanzar)\n"
+        "• finalizar pedido"
+    )
 
     # ENTREGA
     if estado == "elige_entrega":
